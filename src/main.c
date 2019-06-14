@@ -1,277 +1,279 @@
-//gcc uart_posix.c main.c gecko_bglib.c ipc_local_socket.c app.c discovery.c
-
-/**
- * This an example application that demonstrates Bluetooth connectivity
- * using BGLIB C function definitions. The example enables Bluetooth advertisements
- * and connections.
- *
- * Most of the functionality in BGAPI uses a request-response-event pattern
- * where the module responds to a command with a command response indicating
- * it has processed the request and then later sending an event indicating
- * the requested operation has been completed. */
-
+#ifdef PLATFORM_WIN
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
 #include <stdlib.h>
 #include <stdio.h>
-#include <stdbool.h>
-#include <stdint.h>
-#include <errno.h>
-#ifdef _WIN32
-#endif
-
-#ifdef __linux__ 
-#include <pthread.h>
-#include <unistd.h>
-#include <sys/time.h>
-#include "ipc.h"
-#endif
-
-#include <signal.h>
+#include <ctype.h>
 #include <string.h>
-#include <sys/types.h>
+#include <math.h>
 
-#include "infrastructure.h"
-/* BG stack headers */
-#include "gecko_bglib.h"
-#include "bg_types.h"
-
-/* hardware specific headers */
+#include "main.h"
+#include "cmd_def.h"
 #include "uart.h"
 
-/* application specific files */
-#include "app.h"
+const char *state_names[state_last] = {
+    "init",
+    "find_devices",
+    "finding_devices",
+    "stop_finding_devices",
+    "stopping_discovery",
+    "discovery_stopped",
+    "intiate_connection",
+    "establishing_connection",
+    "connection_established",
+    "find_information",
+    "finding_information",
+    "informatin_found",
+    "subscribe",
+    "subscribing",
+    "subscribed",
+    "read_attribute",
+    "reading_attribute",
+    "attribute_read"
+};
+
+states  _state;
+uint16  _tb_sense_device_index;
+uint8   _tb_connection;
+uint16  _num_devices_found;
+bd_addr _found_devices[MAX_DEVICES];
+tb_sense_2 _thunderboard;
 
 
+void usleep(__int64 usec) {
+    HANDLE timer;
+    LARGE_INTEGER ft;
 
-/***************************************************************************************************
- * Local Macros and Definitions
- **************************************************************************************************/
+    ft.QuadPart = -(10 * usec); // Convert to 100 nanosecond interval, negative value indicates relative time
 
-BGLIB_DEFINE();
-
-/** The default baud rate to use. */
-static uint32_t default_baud_rate = 115200;
-
-/** The serial port to use for BGAPI communication. */
-static char* uart_port = NULL;
-
-/** The baud rate to use. */
-static uint32_t baud_rate = 0;
-
-/** File descriptor of uart to NCP */
-static int uart_fd;
-
-/** Daemonize the process (detach from controlling TTY) */
-static bool daemonize = false;
-
-/** Uart Hardware flow control 1:enable, 0:disable */
-static uint32_t rtsCts = 0;
-
-/** Uart Software flow control, 1:enable, 0:disable */
-static uint32_t xonXoff = 1;
-
-/** Usage string */
-#define USAGE "Usage: %s <serial port> <baud rate> [daemon]\n" \
-              "       Serial port is /dev/ttyACM* on WSTK board, /dev/ttyS1 for D-Link hardware\n\n"
-
-/***************************************************************************************************
- * Static Function Declarations
- **************************************************************************************************/
-
-static void getArgs(int argc, char* argv[]);
-static void on_message_send(uint32_t msg_len, uint8_t* msg_data);
-
-/***************************************************************************************************
- * Public Function Definitions
- **************************************************************************************************/
-
-void printEventInfo(uint32_t eventHeader) {
-  uint32_t messageId = BGLIB_MSG_ID(eventHeader);
-  printf("\nMessage ID %X ", messageId);
-  if (messageId & gecko_msg_type_evt) {
-    printf("UNKNOWN EVENT\n");
-  } else {
-    switch(messageId) {
-    case gecko_evt_system_boot_id:
-      printf("SYSTEM BOOT\n");
-    break;
-
-    case gecko_evt_le_gap_scan_response_id:
-      printf("LE GAP SCAN RESPONSE\n");
-    break;
-
-    default:
-      printf("UNKNOWN EVENT\n");
-    break;
-  }
-  }
-
+    timer = CreateWaitableTimer(NULL, TRUE, NULL);
+    SetWaitableTimer(timer, &ft, 0, NULL, NULL, 0);
+    WaitForSingleObject(timer, INFINITE);
+    CloseHandle(timer);
 }
 
-/***********************************************************************************************//**
- *  \brief  The main program.
- *  \param[in] argc Argument count.
- *  \param[in] argv Buffer contaning Serial Port data.
- *  \return  0 on success, -1 on failure.
- **************************************************************************************************/
-int main(int argc, char* argv[])
-{
-  struct gecko_cmd_packet* evt;
-  char*msg;
-  int sc;
-  int source;
-
-	getArgs(argc, argv);
-	
-	/* Daemonize the process, detach from controlling terminal */
-  #ifdef __linux__
-	if (daemonize == true) {
-		daemon(0, 0);
-	}
-  #endif
-	
-	/* Ignore SIGPIPE (when socket disconnects during reads and writes). */
-  //signal (SIGPIPE, SIG_IGN);
-
-  /* Initialize BGLIB with our output function for sending messages. */
-  BGLIB_INITIALIZE_NONBLOCK(on_message_send, uartRx, uartRxPeek);
-
-  /* Initialise the serial port */
-  uart_fd = uartOpen((int8_t*)uart_port, baud_rate, rtsCts, xonXoff, 100);
-
-	if (uart_fd == -1) {
-		perror("serial port: ");
-    exit(EXIT_FAILURE);
-	}
-
-  // Flush std output
-  fflush(stdout);
-
- #ifdef __linux__
-  ipcAddUart(uart_fd);
-
-  sc = ipcHostOpen();
-
-  if (sc == -1) {
-    perror("IPCOpen: ");
-    exit(EXIT_FAILURE);
-  }
+void change_state(states new_state) {
+#ifdef DEBUG
+    printf("DEBUG: State changed: %s --> %s\n", state_names[_state], state_names[new_state]);
 #endif
-  printf("Starting up...\nResetting NCP target...\n");
+    _state = new_state;
+}
 
-  /* Reset NCP to ensure it gets into a defined state.
-   * Once the chip successfully boots, gecko_evt_system_boot_id event should be received.
-   */
-  char p[5] = {0};
-    p[1] =1;
-  on_message_send(5, p);
-  //gecko_cmd_system_reset(0);
-  //gecko_cmd_dfu_reset(0);
-  //gecko_cmd_system_get_bt_address();
-  //usleep(50000);
-  //gecko_cmd_le_gap_set_discovery_type(le_gap_phy_1m, 1);
-  //gecko_cmd_le_gap_start_discovery(le_gap_phy_1m, le_gap_general_discoverable);
+void print_uuid(uint8array *uuid) {
+    int uuidIndex;
+    for (uuidIndex = 0; uuidIndex < uuid->len; uuidIndex++) {
+        printf("%02X", uuid->data[uuidIndex]);
+    }
+}
 
+void print_bdaddr(bd_addr bdaddr) {
+    printf("%02X:%02X:%02X:%02X:%02X:%02X",
+        bdaddr.addr[5],
+        bdaddr.addr[4],
+        bdaddr.addr[3],
+        bdaddr.addr[2],
+        bdaddr.addr[1],
+        bdaddr.addr[0]);
+}
 
-  // struct gecko_msg_system_get_bt_address_rsp_t* addr = gecko_cmd_system_get_bt_address();
-  // printf("Address: %X:%X:%X:%X:%X:%X\n", addr->address.addr[0],
-  //   addr->address.addr[1],
-  //   addr->address.addr[2],
-  //   addr->address.addr[3],
-  //   addr->address.addr[4],
-  //   addr->address.addr[5]);
+void print_raw_packet(struct ble_header *hdr, unsigned char *data) {
+    printf("RX: ");
+    int i;
+    for (i = 0; i < sizeof(*hdr); i++) {
+        printf("%02x ", ((unsigned char *)hdr)[i]);
+    }
+    for (i = 0; i < hdr->lolen; i++) {
+        printf("%02x ", data[i]);
+    }
+    printf("\n");
+}
 
+/**
+ * Compare Bluetooth addresses
+ *
+ * @param first First address
+ * @param second Second address
+ * @return Zero if addresses are equal
+ */
+int cmp_bdaddr(bd_addr first, bd_addr second) {
+    int i;
+    for (i = 0; i < sizeof(bd_addr); i++) {
+        if (first.addr[i] != second.addr[i]) return 1;
+    }
+    return 0;
+}
 
-  do {
-    evt = gecko_peek_event();
-    if (evt !=NULL) {
-      printEventInfo(evt->header);
+void output(uint8 len1, uint8* data1, uint16 len2, uint8* data2) {
+    if (uart_tx(len1, data1) || uart_tx(len2, data2)) {
+        printf("ERROR: Writing to serial port failed\n");
+        exit(1);
+    }
+}
+
+int read_message(int timeout_ms) {
+    unsigned char data[256]; // enough for BLE
+    struct ble_header hdr;
+    int r;
+
+    r = uart_rx(sizeof(hdr), (unsigned char *)&hdr, UART_TIMEOUT);
+    if (!r) {
+        return -1; // timeout
+    } else if (r < 0) {
+        printf("ERROR: Reading header failed. Error code:%d\n", r);
+        return 1;
     }
 
-    appHandleEvents(evt);
-  } while (appBooted == false);
+    if (hdr.lolen) {
+        r = uart_rx(hdr.lolen, data, UART_TIMEOUT);
+        if (r <= 0) {
+            printf("ERROR: Reading data failed. Error code:%d\n", r);
+            return 1;
+        }
+    }
 
-  printf ("...reset complete.\n");
+    const struct ble_msg *msg = ble_get_msg_hdr(hdr);
 
+#ifdef DEBUG
+    print_raw_packet(&hdr, data);
+#endif
 
+    if (!msg) {
+        printf("ERROR: Unknown message received\n");
+        exit(1);
+    }
 
-  // while (1) {
-  //   source = ipcWait();
+    msg->handler(data);
 
-  //   if (source == SRC_NCP) {
-  //     evt = gecko_peek_event();
-  //     appHandleEvents(evt);
-  //   } else if (source == SRC_IPC) {
-  //     msg = appPeekCommand();
-  //     if (msg != NULL) {
-  //       appHandleCommands(msg);
-  //     }
-  //   } else {
-  //     printf("unknown source of message or event\n");
-  //     exit(EXIT_FAILURE);
-  //   }
-  // }
-
-  return -1;
+    return 0;
 }
 
-
-/***************************************************************************************************
- * Static Function Definitions
- **************************************************************************************************/
-
-
-
-/***********************************************************************************************//**
- *  \brief  Function called when a message needs to be written to the serial port.
- *  \param[in] msg_len Length of the message.
- *  \param[in] msg_data Message data, including the header.
- **************************************************************************************************/
-static void on_message_send(uint32_t msg_len, uint8_t* msg_data)
-{
-  /** Variable for storing function return values. */
-  int32_t ret;
-  int msg_iter=0;
-
-  printf("Sending message:\n");
-  for(msg_iter=0; msg_iter<msg_len; msg_iter++) {
-    printf("[%d] %X\n", msg_iter, msg_data[msg_iter]);
-  }
-
-  ret = uartTx(msg_len, msg_data);
-  if (ret < 0) {
-    printf("Failed to write to serial port %s, ret: %d, errno: %d\n", uart_port, ret, errno);
-    exit(EXIT_FAILURE);
-  }
+void wait_for_state_change() {
+    states initial_state = _state;
+    while (initial_state == _state) {
+        if (read_message(UART_TIMEOUT) > 0) {
+            uart_close();
+            change_state(state_init);
+        }
+    }
 }
 
-/***********************************************************************************************//**
- *  \brief  Serial Port initialisation routine.
- *  \param[in] argc Argument count.
- *  \param[in] argv Buffer contaning Serial Port data.
- *  \return  0 on success, -1 on failure.
- **************************************************************************************************/
-static void getArgs(int argc, char* argv[])
-{
-  /**
-   * Handle the command-line arguments.
-   */
-  baud_rate = default_baud_rate;
-  switch (argc) {
-    case 4:
-      if (strcmp(argv[3], "daemon") == 0) {
-      	daemonize = true;
-      }
-    /** Falls through on purpose. */
-    case 3:
-      baud_rate = atoi(argv[2]);
-      uart_port = argv[1];
-    /** Falls through on purpose. */
-    default:
-      break;
-  }
-  if (!uart_port || !baud_rate) {
-    printf(USAGE, argv[0]);
-    exit(EXIT_FAILURE);
-  }
+void init_thunderboard() {
+    memset(&_thunderboard, 0, sizeof(_thunderboard));
+    {
+        uint8 temperature_uuid[] = {0x6E, 0x2A};
+        _thunderboard.temperature.uuid_length = sizeof(temperature_uuid);
+        _thunderboard.temperature.uuid_bytes = malloc(sizeof(temperature_uuid));
+        memcpy(_thunderboard.temperature.uuid_bytes, temperature_uuid, sizeof(temperature_uuid));
+    }
+    {
+        uint8 pressure_uuid[] = { 0x6D, 0x2A };
+        _thunderboard.pressure.uuid_length = sizeof(pressure_uuid);
+        _thunderboard.pressure.uuid_bytes = malloc(sizeof(pressure_uuid));
+        memcpy(_thunderboard.pressure.uuid_bytes, pressure_uuid, sizeof(pressure_uuid));
+    }
 }
 
+int main(int argc, char *argv[]) {
+    // Init bgapi
+    bglib_output = output;
+
+    init_thunderboard();
+
+    change_state(state_init);
+
+    while (1) {
+        switch (_state) {
+        case state_init:
+        {
+            dbg_printf("Opening Serial Port " UART_PORT "... ");
+            if (uart_open(UART_PORT)) {
+                printf("ERROR: Unable to open serial port\n");
+                return 1;
+            }
+            dbg_printf("DONE\n");
+
+            ble_cmd_system_reset(0);
+            uart_close();
+            do {
+                usleep(500000); // 0.5s
+            } while (uart_open(UART_PORT));
+            change_state(state_find_devices);
+        }
+        break;
+        
+        case state_find_devices:
+        {
+            _tb_sense_device_index = -1;
+            _num_devices_found = 0;
+            dbg_printf("Scanning for devices...\n");
+            ble_cmd_gap_discover(gap_discover_observation);
+            change_state(state_finding_devices);
+        }
+        break;
+
+        case state_finding_devices:
+        {
+            wait_for_state_change();
+        }
+        break;
+
+        case state_stop_finding_devices:
+        {
+            change_state(state_stopping_discovery);
+            ble_cmd_gap_end_procedure();
+        }
+        break;
+
+        case state_stopping_discovery:
+        {
+            wait_for_state_change();
+        }
+        break;
+
+        case state_discovery_stopped:
+        {
+            if (_tb_sense_device_index != -1) {
+                // Thunderboard was found. Connect to it
+                change_state(state_intiate_connection);
+            } else {
+                // Thunderboard not found. Start over.
+                change_state(state_find_devices);
+            }
+        }
+        break;
+
+        case state_intiate_connection:
+        {
+            change_state(state_establishing_connection);
+            ble_cmd_gap_connect_direct(&_found_devices[_tb_sense_device_index], gap_address_type_public, 40, 60, 100, 0);
+        }
+        break;
+
+        case state_establishing_connection:
+        {
+            wait_for_state_change();
+        }
+        break;
+
+        case state_connection_established:
+            change_state(state_find_information);
+            ble_cmd_attclient_find_information(_tb_connection, 0x01, 0xFFFF);
+        break;
+
+        case state_finding_information:
+        case state_find_information:
+        {
+            wait_for_state_change();
+        }
+        break;
+
+        default:
+            printf("ERROR: Unhandled state %s\n", state_names[_state]);
+            exit(1);
+        break;
+        }
+    }
+
+}

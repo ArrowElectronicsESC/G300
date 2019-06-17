@@ -8,6 +8,8 @@
 #include <ctype.h>
 #include <string.h>
 #include <math.h>
+#include <time.h>
+
 
 #include "main.h"
 #include "cmd_def.h"
@@ -31,7 +33,8 @@ const char *state_names[state_last] = {
     "subscribed",
     "read_attribute",
     "reading_attribute",
-    "attribute_read"
+    "attribute_read",
+    "idle"
 };
 
 states  _state;
@@ -40,7 +43,8 @@ uint8   _tb_connection;
 uint16  _num_devices_found;
 bd_addr _found_devices[MAX_DEVICES];
 tb_sense_2 _thunderboard;
-
+tb_sensor *_subscribe_characteristic;
+uint16 _last_read_sensor_index;
 
 void usleep(__int64 usec) {
     HANDLE timer;
@@ -159,23 +163,67 @@ void wait_for_state_change() {
     }
 }
 
+void create_sensor(uint8 uuid[], int uuid_length, subscription_type subscription, sensor_id id, tb_sensor *sensor) {
+    sensor->uuid_length = uuid_length;
+    sensor->uuid_bytes = malloc(uuid_length);
+    sensor->subscribe = subscription;
+    sensor->id = id;
+    memcpy(sensor->uuid_bytes, uuid, uuid_length);
+}
+
 void init_thunderboard() {
     memset(&_thunderboard, 0, sizeof(_thunderboard));
     {
         uint8 temperature_uuid[] = {0x6E, 0x2A};
-        _thunderboard.temperature.uuid_length = sizeof(temperature_uuid);
-        _thunderboard.temperature.uuid_bytes = malloc(sizeof(temperature_uuid));
-        memcpy(_thunderboard.temperature.uuid_bytes, temperature_uuid, sizeof(temperature_uuid));
+        create_sensor(temperature_uuid, sizeof(temperature_uuid), sub_none, sensor_temperature, &_thunderboard.temperature);
     }
     {
         uint8 pressure_uuid[] = { 0x6D, 0x2A };
-        _thunderboard.pressure.uuid_length = sizeof(pressure_uuid);
-        _thunderboard.pressure.uuid_bytes = malloc(sizeof(pressure_uuid));
-        memcpy(_thunderboard.pressure.uuid_bytes, pressure_uuid, sizeof(pressure_uuid));
+        create_sensor(pressure_uuid, sizeof(pressure_uuid), sub_none, sensor_pressure, &_thunderboard.pressure);
+    }
+    {
+        uint8 humidity_uuid[] = { 0x6F, 0x2A };
+        create_sensor(humidity_uuid, sizeof(humidity_uuid), sub_none, sensor_humidity, &_thunderboard.humidity);
+    }
+    {
+        uint8 co2_uuid[] = { 0x3B, 0x10, 0x19, 0x00, 0xB0, 0x91, 0xE7, 0x76, 0x33, 0xEF, 0x01,
+            0xC4, 0xAE, 0x58, 0xD6, 0xEF};
+        create_sensor(co2_uuid, sizeof(co2_uuid), sub_none, sensor_co2, &_thunderboard.co2);
+    }
+    {
+        uint8 voc_uuid[] = { 0x3B, 0x10, 0x19, 0x0, 0xB0, 0x91, 0xE7, 0x76, 0x33, 0xEF, 0x2, 0xC4, 0xAE, 0x58, 0xD6, 0xEF};
+        create_sensor(voc_uuid, sizeof(voc_uuid), sub_none, sensor_voc, &_thunderboard.voc);
+    }
+    {
+        uint8 light_uuid[] = { 0x2E, 0xA3, 0xF4, 0x54, 0x87, 0x9F, 0xDE, 0x8D, 0xEB, 0x45, 0xD9, 0xBF, 0x13, 0x69, 0x54, 0xC8};
+        create_sensor(light_uuid, sizeof(light_uuid), sub_none, sensor_light, &_thunderboard.light);
+    }
+    {
+        uint8 uv_uuid[] = {0x76, 0x2A};
+        create_sensor(uv_uuid, sizeof(uv_uuid), sub_none, sensor_uv, &_thunderboard.uv);
+    }
+    {
+        uint8 sound_uuid[] = { 0x2E, 0xA3, 0xF4, 0x54, 0x87, 0x9F, 0xDE, 0x8D, 0xEB, 0x45, 0x2, 0xBF, 0x13, 0x69, 0x54, 0xC8 };
+        create_sensor(sound_uuid, sizeof(sound_uuid), sub_none, sensor_sound, &_thunderboard.sound);
+    }
+    {
+        uint8 acceleration_uuid[] = { 0x9F, 0xDC, 0x9C, 0x81, 0xFF, 0xFE, 0x5D, 0x88, 0xE5, 0x11, 0xE5, 0x4B, 0xE2, 0xF6, 0xC1, 0xC4 };
+        create_sensor(acceleration_uuid, sizeof(acceleration_uuid), sub_needs, sensor_acceleration, &_thunderboard.acceleration);
+    }
+    {
+        uint8 orientation_uuid[] = { 0x9A, 0xF4, 0x94, 0xE9, 0xB5, 0xF3, 0x9F, 0xBA, 0xDD, 0x45, 0xE3, 0xBE, 0x94, 0xB6, 0xC4, 0xB7 };
+        create_sensor(orientation_uuid, sizeof(orientation_uuid), sub_needs, sensor_orientation, &_thunderboard.orientation);
+    }
+    {
+        uint8 rgb_uuid[] = { 0x1B, 0x40, 0x4A, 0x44, 0xCE, 0x5E, 0xC3, 0x7D, 0xF3, 0x59, 0x3, 0xC6, 0x40, 0x9C, 0xB8, 0xFC };
+        create_sensor(rgb_uuid, sizeof(rgb_uuid), sub_none, sensor_rgb, &_thunderboard.rgb);
     }
 }
 
 int main(int argc, char *argv[]) {
+    time_t last_sensor_read_time;
+    last_sensor_read_time = time(NULL);
+
     // Init bgapi
     bglib_output = output;
 
@@ -262,10 +310,74 @@ int main(int argc, char *argv[]) {
             ble_cmd_attclient_find_information(_tb_connection, 0x01, 0xFFFF);
         break;
 
+        case state_reading_attribute:
+        case state_subscribing:
         case state_finding_information:
         case state_find_information:
         {
             wait_for_state_change();
+        }
+        break;
+
+        case state_information_found:
+            change_state(state_subscribe);
+        break;
+
+        case state_subscribe:
+        {
+            int sensor_index = 0;
+            for (sensor_index = 0; sensor_index < NUM_TB2_SENSORS; sensor_index++) {
+                if (_thunderboard.all[sensor_index].subscribe == sub_needs) {
+                    if (_thunderboard.all[sensor_index].handle == 0) {
+                        printf("ERROR Missing handle");
+                        return;
+                    }
+                    _subscribe_characteristic = &_thunderboard.all[sensor_index];
+                    uint8 subscribe_data[] = { 0x03, 0x00 };
+                    ble_cmd_attclient_attribute_write(_tb_connection, _thunderboard.all[sensor_index].handle + 1, 2, subscribe_data);
+                    _thunderboard.all[sensor_index].subscribe = sub_fulfilled;
+                    change_state(state_subscribing);
+                    break;
+                }
+            }
+            // All subscriptions have been made
+            if (_state == state_subscribe) {
+                change_state(state_subscribed);
+            }
+        }
+        break;
+
+        case state_subscribed:
+            change_state(state_idle);
+        break;
+
+        case state_idle:
+        {
+            while ((time(NULL) - last_sensor_read_time) < 2) {
+                if (read_message(UART_TIMEOUT) > 0) {
+                    uart_close();
+                    change_state(state_init);
+                }
+            }
+            _last_read_sensor_index = -1;
+            change_state(state_read_attribute);
+        }
+        break;
+
+        case state_read_attribute:
+        {
+            for (_last_read_sensor_index++; _last_read_sensor_index < NUM_TB2_SENSORS;) {
+                if (_thunderboard.all[_last_read_sensor_index].subscribe == sub_none) {
+                    ble_cmd_attclient_read_by_handle(_tb_connection, _thunderboard.all[_last_read_sensor_index].handle);
+                    change_state(state_reading_attribute);
+                    break;
+                } else {
+                    _last_read_sensor_index++;
+                }
+            }
+            if (_state == state_read_attribute) {
+                change_state(state_idle);
+            }
         }
         break;
 

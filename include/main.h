@@ -7,7 +7,7 @@
 #define THUNDERBOARD_DEVICE_NAME_PREFIX "Thunder Sense #"
 
 #ifdef DEBUG
-#define dbg_printf(x) printf("(DEBUG) " x)
+#define dbg_printf(...) printf("(DEBUG) " __VA_ARGS__)
 #else
 #define dbg_printf(x)
 #endif
@@ -31,35 +31,69 @@ typedef enum {
     state_read_attribute,
     state_reading_attribute,
     state_attribute_read,
+    state_idle,
     state_last
 } states;
 
 typedef enum {
-    type_float,
+    sensor_temperature,
+    sensor_pressure,
+    sensor_humidity,
+    sensor_co2,
+    sensor_voc,
+    sensor_light,
+    sensor_uv,
+    sensor_sound,
+    sensor_acceleration,
+    sensor_orientation,
+    sensor_rgb
+} sensor_id;
+
+typedef enum {
+    sub_none,
+    sub_needs,
+    sub_fulfilled
+} subscription_type;
+
+typedef enum {
+    type_double,
+    type_double_triplet,
     type_int
 } value_type;
 
 typedef struct tb_sensor_val {
     value_type type;
     union {
-        float float_val;
+        double double_val;
+        double double_triplet_val[3];
         uint32 int_val;
     } value;
 } tb_sensor_val;
 
 typedef struct tb_sensor {
+    sensor_id id;
     uint8 *uuid_bytes;
     uint32 uuid_length;
     uint32 handle;
     tb_sensor_val value;
+    subscription_type subscribe;
 } tb_sensor;
 
-#define NUM_TB2_SENSORS 2
+#define NUM_TB2_SENSORS 11
 typedef struct tb_sense_2 {
     union {
         struct {
             tb_sensor temperature;
             tb_sensor pressure;
+            tb_sensor humidity;
+            tb_sensor co2;
+            tb_sensor voc;
+            tb_sensor light;
+            tb_sensor uv;
+            tb_sensor sound;
+            tb_sensor acceleration;
+            tb_sensor orientation;
+            tb_sensor rgb;
         };
         tb_sensor all[NUM_TB2_SENSORS];
     };

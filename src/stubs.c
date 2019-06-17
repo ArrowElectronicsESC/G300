@@ -58,9 +58,6 @@ void ble_rsp_test_channel_mode(const void*nul)
 
 }
 
-void ble_evt_system_protocol_error(const struct ble_msg_system_protocol_error_evt_t*msg)
-{
-}
 
 void ble_rsp_system_reset(const void* nul)
 {
@@ -232,17 +229,8 @@ void ble_rsp_attclient_read_by_handle(const struct ble_msg_attclient_read_by_han
 {
 }
 
-void ble_rsp_attclient_attribute_write(const struct ble_msg_attclient_attribute_write_rsp_t *msg)
-{
-}
 
-void ble_rsp_attclient_write_command(const struct ble_msg_attclient_write_command_rsp_t *msg)
-{
-}
 
-void ble_rsp_attclient_indicate_confirm(const struct ble_msg_attclient_indicate_confirm_rsp_t *msg)
-{
-}
 
 void ble_rsp_attclient_read_long(const struct ble_msg_attclient_read_long_rsp_t *msg)
 {

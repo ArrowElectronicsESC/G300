@@ -259,27 +259,66 @@ int uart_rx(int len,unsigned char *data,int timeout_ms)
 #include <fcntl.h>
 #include <unistd.h>
 
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
+#include <sys/ioctl.h>
+
 int serial_handle;
 
 void uart_list_devices() {}
 
 int uart_open(char *port)
 {
-    struct termios options;
-    int i;
+    struct termios settings;
+    memset(&settings, 0, sizeof(settings));
+    int serial_flags = O_RDWR | O_NOCTTY | O_NONBLOCK;
+    int handle = 0;
 
-    serial_handle = open(port, (O_RDWR | O_NOCTTY /*| O_NDELAY*/));
+     handle = open(port, serial_flags);
 
-    if (serial_handle < 0)
-    {
+    if (ioctl(handle, TIOCEXCL) == -1) {
+        printf("ERROR: %d (%s) from ioctl\n", errno, strerror(errno));
         return -1;
     }
 
-    /*
-     * Get the current options for the port...
-     */
-    tcgetattr(serial_handle, &options);
+    if (fcntl(handle, F_SETFL, 0) == -1) {
+        printf("ERROR: %d (%s) from fcntl\n", errno, strerror(errno));
+        return -1;
+    }
 
+    if (tcgetattr(handle, &settings) != 0) {
+        printf("ERROR: %d (%s) from tcgetattr\n", errno, strerror(errno));
+        return -1;
+    }
+
+    if (cfsetspeed(&settings, B115200) == -1) {
+        printf("ERROR: %d (%s) from cfsetspeed\n", errno, strerror(errno));
+        return -1;
+    }
+
+    cfmakeraw(&settings);
+
+    settings.c_cflag = (CLOCAL | CREAD | CS8);
+    settings.c_cflag &= ~PARENB;
+    settings.c_cflag &= ~CSTOPB;
+    settings.c_cflag &= ~CRTSCTS;
+    settings.c_iflag = (IGNBRK | IXON | IXOFF);
+    settings.c_lflag = 0;
+    settings.c_oflag = 0;
+    settings.c_cc[VMIN]  = 0; 
+    settings.c_cc[VTIME] = 10;
+
+    if (tcsetattr(handle, TCSANOW, &settings)) {
+        printf("ERROR: %d (%s) from tcsetattr\n", errno, strerror(errno));
+        return -1;
+    }
+    
+    sleep(1);
+    tcflush(serial_handle, TCIOFLUSH);
+    serial_handle = handle;
+#if 0
     /*
      * Set the baud rates to 115200...
      */
@@ -306,7 +345,9 @@ int uart_open(char *port)
      * Set the new options for the port...
      */
     tcsetattr(serial_handle, TCSAFLUSH, &options);
-
+	sleep(1);
+tcflush(serial_handle, TCIOFLUSH);
+#endif
     return 0;
 }
 void uart_close()
@@ -317,6 +358,18 @@ void uart_close()
 int uart_tx(int len,unsigned char *data)
 {
     ssize_t written;
+
+#if 1
+    int i;
+    if (data) {
+        printf("TX: ");
+        for (i = 0; i < len; i++) {
+            printf("%02X ", data[i]);
+        }
+        printf("\n");
+    }
+
+#endif
 
     while(len)
     {
@@ -337,10 +390,10 @@ int uart_rx(int len,unsigned char *data,int timeout_ms)
     ssize_t rread;
     struct termios options;
 
-    tcgetattr(serial_handle, &options);
-    options.c_cc[VTIME] = timeout_ms/100;
-    options.c_cc[VMIN] = 0;
-    tcsetattr(serial_handle, TCSANOW, &options);
+    //tcgetattr(serial_handle, &options);
+    //options.c_cc[VTIME] = timeout_ms/100;
+    //options.c_cc[VMIN] = 0;
+    //tcsetattr(serial_handle, TCSANOW, &options);
 
     while(len)
     {

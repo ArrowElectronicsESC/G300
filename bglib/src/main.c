@@ -2,6 +2,11 @@
 #include <windows.h>
 #else
 #include <unistd.h>
+#include <stdint.h>
+#include <fcntl.h>
+#include <termios.h>
+#include <errno.h>
+#include <sys/ioctl.h>
 #endif
 #include <stdlib.h>
 #include <stdio.h>
@@ -13,7 +18,7 @@
 
 #include "main.h"
 #include "cmd_def.h"
-#include "uart.h"
+//#include "uart.h"
 
 const char *state_names[state_last] = {
     "init",
@@ -45,7 +50,139 @@ bd_addr _found_devices[MAX_DEVICES];
 tb_sense_2 _thunderboard;
 tb_sensor *_subscribe_characteristic;
 uint16 _last_read_sensor_index;
+int    _serial_handle;
 
+#define TRUE  1
+#define FALSE 0
+typedef uint8_t bool;
+
+typedef struct {
+    char *port;
+    int baudrate;
+} SerialArgs;
+
+int set_interface_attributes(int handle, int baudrate) {
+    struct termios settings;
+    memset(&settings, 0, sizeof(settings));
+
+    if (ioctl(handle, TIOCEXCL) == -1) {
+        printf("ERROR: %d (%s) from ioctl\n", errno, strerror(errno));
+        return -1;
+    }
+
+    if (fcntl(handle, F_SETFL, 0) == -1) {
+        printf("ERROR: %d (%s) from fcntl\n", errno, strerror(errno));
+        return -1;
+    }
+
+    if (tcgetattr(handle, &settings) != 0) {
+        printf("ERROR: %d (%s) from tcgetattr\n", errno, strerror(errno));
+        return -1;
+    }
+
+    if (cfsetspeed(&settings, baudrate) == -1) {
+        printf("ERROR: %d (%s) from cfsetspeed\n", errno, strerror(errno));
+        return -1;
+    }
+
+    cfmakeraw(&settings);
+
+    settings.c_cflag = (CLOCAL | CREAD | CS8);
+    settings.c_cflag &= ~PARENB;
+    settings.c_cflag &= ~CSTOPB;
+    settings.c_cflag &= ~CRTSCTS;
+    settings.c_iflag = (IGNBRK | IXON | IXOFF);
+    settings.c_lflag = 0;
+    settings.c_oflag = 0;
+    settings.c_cc[VMIN]  = 0; 
+    settings.c_cc[VTIME] = 5;
+
+    if (tcsetattr(handle, TCSANOW, &settings)) {
+        printf("ERROR: %d (%s) from tcsetattr\n", errno, strerror(errno));
+        return -1;
+    }
+
+    return 0;
+}
+
+bool get_args(int argc, char* argv[], SerialArgs *serial_args) {
+    bool valid_args = TRUE;
+
+    switch (argc) {
+        case 1:
+            serial_args->port = "/dev/ttyS1";
+            serial_args->baudrate = 115200;
+        break;
+
+        case 3:
+            serial_args->port = argv[1];
+            serial_args->baudrate = atoi(argv[2]);
+        break;
+
+        default:
+            valid_args = FALSE;
+            printf("Usage: %s <serial port> <baud rate>\n", argv[0]);
+        break;
+    }
+
+    return valid_args;
+}
+
+void print_buffer(uint32_t length, uint8_t *data) {
+    uint32_t byte_index;
+    for (byte_index = 0; byte_index < length; byte_index++) {
+        printf("%02X%s", data[byte_index], (byte_index == (length - 1)) ? "" : " ");
+    }
+}
+
+int serial_write(int length, uint8_t *data) {
+    int bytes_written = 0;
+    int bytes_remaining = length;
+
+    printf("TX: ");
+    print_buffer(length, data);
+    printf("\n");
+
+    while (bytes_written < length) {
+        bytes_written = write(_serial_handle, data, bytes_remaining);
+        if (bytes_written == -1) {
+            return -1;
+        }
+        bytes_remaining -= bytes_written;
+        data += bytes_written;
+    }
+
+    return length;
+}
+
+int serial_read(int length, uint8_t *data) {
+    int bytes_read = 0;
+    int bytes_remaining = length;
+
+    while (bytes_read < length) {
+        bytes_read = read(_serial_handle, data, bytes_remaining);
+
+        if (bytes_read == -1) {
+            printf("ERROR: read failure - %d (%s)\n", errno, strerror(errno));
+            return -1;
+        } else if (bytes_read == 0) {
+            printf("ERROR: No bytes read\n");
+            return 0;
+        }
+
+        bytes_remaining -= bytes_read;
+        data += bytes_read;
+    }
+
+    printf("RX: ");
+    print_buffer(length, data);
+    printf("\n");
+
+    return length;
+}
+
+
+#ifdef PLATFORM_WIN
 void usleep(__int64 usec) {
     HANDLE timer;
     LARGE_INTEGER ft;
@@ -57,6 +194,7 @@ void usleep(__int64 usec) {
     WaitForSingleObject(timer, INFINITE);
     CloseHandle(timer);
 }
+#endif
 
 void change_state(states new_state) {
 #ifdef DEBUG
@@ -110,7 +248,8 @@ int cmp_bdaddr(bd_addr first, bd_addr second) {
 }
 
 void output(uint8 len1, uint8* data1, uint16 len2, uint8* data2) {
-    if (uart_tx(len1, data1) || uart_tx(len2, data2)) {
+
+    if (serial_write(len1, data1) != len1 || serial_write(len2, data2) != len2) {
         printf("ERROR: Writing to serial port failed\n");
         exit(1);
     }
@@ -121,7 +260,7 @@ int read_message(int timeout_ms) {
     struct ble_header hdr;
     int r;
 
-    r = uart_rx(sizeof(hdr), (unsigned char *)&hdr, UART_TIMEOUT);
+    r = serial_read(sizeof(hdr), (unsigned char *)&hdr);
     if (!r) {
         return -1; // timeout
     } else if (r < 0) {
@@ -130,7 +269,7 @@ int read_message(int timeout_ms) {
     }
 
     if (hdr.lolen) {
-        r = uart_rx(hdr.lolen, data, UART_TIMEOUT);
+        r = serial_read(hdr.lolen, data);
         if (r <= 0) {
             printf("ERROR: Reading data failed. Error code:%d\n", r);
             return 1;
@@ -220,6 +359,29 @@ void init_thunderboard() {
     }
 }
 
+int uart_open() {
+    int serial_flags = O_RDWR | O_NOCTTY | O_NONBLOCK;
+    _serial_handle = open(UART_PORT, serial_flags);
+
+    if (_serial_handle < 0) {
+        printf("ERROR: Could not open serial port.\n");
+        exit(1);
+    }
+
+    if (set_interface_attributes(_serial_handle, B115200) == -1) {
+        exit(1);
+    }
+    sleep(1);
+    tcflush(_serial_handle, TCIOFLUSH);
+
+    return 0;
+}
+
+int uart_close() {
+    close(_serial_handle);
+    return 0;
+}
+
 int main(int argc, char *argv[]) {
     time_t last_sensor_read_time;
     last_sensor_read_time = time(NULL);
@@ -236,17 +398,18 @@ int main(int argc, char *argv[]) {
         case state_init:
         {
             dbg_printf("Opening Serial Port " UART_PORT "... ");
-            if (uart_open(UART_PORT)) {
+            if (uart_open() == -1) {
                 printf("ERROR: Unable to open serial port\n");
                 return 1;
             }
             dbg_printf("DONE\n");
 
-            ble_cmd_system_reset(0);
+            gecko_cmd_system_reset(0);
             uart_close();
             do {
-                usleep(500000); // 0.5s
-            } while (uart_open(UART_PORT));
+		      dbg_printf("Waiting for UART...\n");
+                usleep(2000000); // 1s
+            } while (uart_open() == -1);
             change_state(state_find_devices);
         }
         break;

@@ -1,9 +1,10 @@
+#include <stdlib.h>
 #include "apitypes.h"
 
 #define DEBUG
 #define MAX_DEVICES 64
-#define UART_PORT "COM5"
-#define UART_TIMEOUT 1000
+#define UART_PORT "/dev/ttyS1"
+#define UART_TIMEOUT 5000
 #define THUNDERBOARD_DEVICE_NAME_PREFIX "Thunder Sense #"
 
 #ifdef DEBUG

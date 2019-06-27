@@ -1,17 +1,22 @@
-/***********************************************************************************************//**
- * \file   uart_posix.c
- * \brief  UART implementation for POSIX environment
- ***************************************************************************************************
- * <b> (C) Copyright 2015 Silicon Labs, http://www.silabs.com</b>
- ***************************************************************************************************
- * This file is licensed under the Silabs License Agreement. See the file
- * "Silabs_License_Agreement.txt" for details. Before using this software for
- * any purpose, you must agree to the terms of that agreement.
- **************************************************************************************************/
+/***************************************************************************//**
+ * @file
+ * @brief UART implementation for POSIX environment
+ *******************************************************************************
+ * # License
+ * <b>Copyright 2018 Silicon Laboratories Inc. www.silabs.com</b>
+ *******************************************************************************
+ *
+ * The licensor of this software is Silicon Laboratories Inc. Your use of this
+ * software is governed by the terms of Silicon Labs Master Software License
+ * Agreement (MSLA) available at
+ * www.silabs.com/about-us/legal/master-software-license-agreement. This
+ * software is distributed to you in Source Code format and is governed by the
+ * sections of the MSLA applicable to Source Code.
+ *
+ ******************************************************************************/
 
 #include <stdint.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
@@ -21,27 +26,26 @@
 
 #include "uart.h"
 
-
 #if __APPLE__ != 1 && __linux != 1
 #error "**** Unsupported OS! This UART driver works on OSX and Linux only! ****"
 #endif /* __APPLE__ != 1 && __linux != 1 */
 
 /***************************************************************************************************
- Local Variables
+ * Local Variables
  **************************************************************************************************/
 
 static struct {
   uint32_t cbaud;
   uint32_t nspeed;
 } speedTab[] = {
-  { B300,    300    },
-  { B1200,   1200   },
-  { B2400,   2400   },
-  { B4800,   4800   },
-  { B9600,   9600   },
-  { B19200,  19200  },
-  { B38400,  38400  },
-  { B57600,  57600  },
+  { B300, 300    },
+  { B1200, 1200   },
+  { B2400, 2400   },
+  { B4800, 4800   },
+  { B9600, 9600   },
+  { B19200, 19200  },
+  { B38400, 38400  },
+  { B57600, 57600  },
   { B115200, 115200 },
   { 0, 0 }
 };
@@ -50,54 +54,37 @@ static int32_t serialHandle = -1;
 static struct termios origTTYAttrs;
 
 /***************************************************************************************************
- Static Function Declarations
+ * Static Function Declarations
  **************************************************************************************************/
-
-static void softReset(int8_t *port, uint32_t baudRate);
 static int32_t uartOpenSerial(int8_t* device, uint32_t bps, uint32_t dataBits, uint32_t parity,
                               uint32_t stopBits, uint32_t rtsCts, uint32_t xOnXOff,
                               int32_t timeout);
 static int32_t uartCloseSerial(int32_t handle);
 
 /***************************************************************************************************
- Public Function Definitions
+   Public Function Definitions
  **************************************************************************************************/
-int32_t uartOpen(int8_t* port, uint32_t baudRate, uint32_t rtsCts, uint32_t xonXoff, int32_t timeout)
+int32_t uartOpen(int8_t* port, uint32_t baudRate, uint32_t rtsCts, int32_t timeout)
 {
-  softReset(port, baudRate);
-  serialHandle = uartOpenSerial(port, baudRate, 8, 0, 1, rtsCts, xonXoff, timeout);
-	sleep(1);
-	tcflush(serialHandle, TCIOFLUSH);
+  uint8_t buf[4];
 
-  return serialHandle;
+  serialHandle = uartOpenSerial(port, baudRate, 8, 0, 1, rtsCts, 0, timeout);
+
+  if (-1 == serialHandle) {
+    return -1;
+  }
+
+  // Flush all accumulated data in target
+  usleep(50000);
+  while (uartRxNonBlocking(4, buf) == 4) {
+  }
+
+  return 0;
 }
 
 int32_t uartClose(void)
 {
   return uartCloseSerial(serialHandle);
-}
-
-/***************************************************************************************************
- Send the BGAPI reset command to the NCP manually instead of with gecko_cmd_system_reset.
- Flush buffers and close.  This is used to as a workaround to help with resetting the device. 
- **************************************************************************************************/
-void softReset(int8_t *port, uint32_t baudRate)
-{
-	uint8_t reset_cmd[5] = {0x20, 0x01, 0x01, 0x01, 0x00};
-
-  serialHandle = uartOpenSerial(port, baudRate, 8, 0, 1, 0,0, 5000);
-  
-	if (serialHandle == -1) {
-		perror ("failed to open serial port:");
-		exit(EXIT_FAILURE);
-	}
-	
-	tcflush(serialHandle, TCIOFLUSH);
-
-	uartTx(sizeof reset_cmd, reset_cmd);
-	printf("Initial reset command sent\n");	
-	uartClose();
-	serialHandle = -1;
 }
 
 int32_t uartRx(uint32_t dataLength, uint8_t* data)
@@ -111,8 +98,6 @@ int32_t uartRx(uint32_t dataLength, uint8_t* data)
     return -1;
   }
 
-
-
   while (dataToRead) {
     dataRead = read(serialHandle, (void*)data, dataToRead);
     if (-1 == dataRead) {
@@ -122,13 +107,6 @@ int32_t uartRx(uint32_t dataLength, uint8_t* data)
       data += dataRead;
     }
   }
-
-    uint32_t byteIndex;
-  printf("\nRX: ");
-  for (byteIndex = 0; byteIndex < dataLength; byteIndex++) {
-    printf("%02X", data[byteIndex]);
-  }
-  printf("\n");
 
   return (int32_t)dataLength;
 }
@@ -194,7 +172,7 @@ int32_t uartTx(uint32_t dataLength, uint8_t* data)
 }
 
 /***************************************************************************************************
- Static Function Definitions
+ * Static Function Definitions
  **************************************************************************************************/
 
 /***********************************************************************************************//**
@@ -215,7 +193,7 @@ static int32_t uartOpenSerial(int8_t* device, uint32_t bps, uint32_t dataBits, u
 {
   uint32_t i;
   int32_t serial = -1;
-  struct termios ttyAttrs = {0};
+  struct termios ttyAttrs = { 0 };
 
   /* Check if baud rate is supported. Return -1 if not. */
   for (i = 0; speedTab[i].nspeed != 0; i++) {
@@ -363,7 +341,7 @@ static int32_t uartOpenSerial(int8_t* device, uint32_t bps, uint32_t dataBits, u
   } else {
     /* Block until character is received or timer expires. */
     ttyAttrs.c_cc[VMIN] = 0;
-    ttyAttrs.c_cc[VTIME] = (cc_t)timeout/100;
+    ttyAttrs.c_cc[VTIME] = (cc_t)timeout / 100;
   }
 
   /* Cause the new options to take effect immediately. */
@@ -397,5 +375,3 @@ static int32_t uartCloseSerial(int32_t handle)
 
   return ret;
 }
-
-

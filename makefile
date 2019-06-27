@@ -15,4 +15,4 @@ serial:
 	$(CC) src/serial_test.c -o serial_test
 
 gecko:
-	$(CC) gecko_bglib/src/main.c gecko_bglib/src/app.c gecko_bglib/src/uart_posix.c gecko_bglib/src/gecko_bglib.c -Igecko_bglib/include -o g300demo
+	$(CC) -Wall gecko_bglib/src/main.c gecko_bglib/src/app.c gecko_bglib/src/uart_posix.c gecko_bglib/src/gecko_bglib.c -Igecko_bglib/include -o g300demo

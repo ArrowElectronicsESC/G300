@@ -1,13 +1,19 @@
-/***********************************************************************************************//**
- * \file   uart.h
- * \brief  UART header file
- ***************************************************************************************************
- * <b> (C) Copyright 2015 Silicon Labs, http://www.silabs.com</b>
- ***************************************************************************************************
- * This file is licensed under the Silabs License Agreement. See the file
- * "Silabs_License_Agreement.txt" for details. Before using this software for
- * any purpose, you must agree to the terms of that agreement.
- **************************************************************************************************/
+/***************************************************************************//**
+ * @file
+ * @brief UART header file
+ *******************************************************************************
+ * # License
+ * <b>Copyright 2018 Silicon Laboratories Inc. www.silabs.com</b>
+ *******************************************************************************
+ *
+ * The licensor of this software is Silicon Laboratories Inc. Your use of this
+ * software is governed by the terms of Silicon Labs Master Software License
+ * Agreement (MSLA) available at
+ * www.silabs.com/about-us/legal/master-software-license-agreement. This
+ * software is distributed to you in Source Code format and is governed by the
+ * sections of the MSLA applicable to Source Code.
+ *
+ ******************************************************************************/
 
 #ifndef UART_H
 #define UART_H
@@ -32,7 +38,6 @@
  * @{
  **************************************************************************************************/
 
-
 /***********************************************************************************************//**
  *  \brief  Open the serial port.
  *  \param[in]  port Serial port to use.
@@ -42,7 +47,7 @@
  *              milliseconds.
  *  \return  0 on success, -1 on failure.
  **************************************************************************************************/
-int32_t uartOpen(int8_t* port, uint32_t baudRate, uint32_t rtsCts, uint32_t xonXoff, int32_t timeout);
+int32_t uartOpen(int8_t* port, uint32_t baudRate, uint32_t rtsCts, int32_t timeout);
 
 /***********************************************************************************************//**
  *  \brief  Close the serial port.
@@ -86,7 +91,6 @@ int32_t uartRxPeek(void);
  *  \return  The amount of bytes written or -1 on failure.
  **************************************************************************************************/
 int32_t uartTx(uint32_t dataLength, uint8_t* data);
-
 
 /** @} (end addtogroup uart) */
 /** @} (end addtogroup platform_hw) */

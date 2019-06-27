@@ -9,11 +9,15 @@
 #include "gecko_bglib.h"
 #include "uart.h"
 
+extern SensorValues _sensor_values;
+
 static void get_parameters(int argc, char **argv, uint32_t *baudrate, char **serial_port);
+static void upload_sensor_values();
 
 BGLIB_DEFINE();
 
 int main(int argc, char **argv) {
+    uint32_t last_reading_id = 0;
     uint32_t baudrate;
     char *serial_port;
     struct gecko_cmd_packet *event;
@@ -33,6 +37,11 @@ int main(int argc, char **argv) {
 
         if (event) {
             handle_event(event);
+        }
+
+        if (_sensor_values.id > last_reading_id) {
+            last_reading_id = _sensor_values.id;
+            upload_sensor_values();
         }
     }
 
@@ -62,4 +71,19 @@ void serial_write(uint32_t length, uint8_t *data) {
     if (result < 0) {
         printf("ERROR: Failed to write to serial port\n  Error: %d\nErrno: %d", result, errno);
     }
+}
+
+static void upload_sensor_values() {
+    printf("\nSending Sensor Values:\n");
+    printf("  Temperature: %f\n", _sensor_values.temperature);
+    printf("  Pressure: %f\n", _sensor_values.pressure);
+    printf("  Humidity: %f\n", _sensor_values.humidity);
+    printf("  CO2: %f\n", _sensor_values.co2);
+    printf("  VOC: %f\n", _sensor_values.voc);
+    printf("  Light: %f\n", _sensor_values.light);
+    printf("  Sound: %f\n", _sensor_values.sound);
+    printf("  Acceleration: (%f, %f, %f)\n", _sensor_values.acceleration[0], _sensor_values.acceleration[1],
+           _sensor_values.acceleration[2]);
+    printf("  Orientation: (%f, %f, %f)\n", _sensor_values.orientation[0], _sensor_values.orientation[1],
+           _sensor_values.orientation[2]);
 }

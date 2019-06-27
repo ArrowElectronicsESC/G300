@@ -11,14 +11,18 @@ static void initialize_thunderboard();
 static void handle_state_transition(AppState new_state);
 static void print_message_info(struct gecko_cmd_packet *event);
 static bool handle_advertisement(struct gecko_cmd_packet *event);
+static void refresh_sensor_values();
+static Characteristic *get_characteristic_by_handle(uint16_t handle);
 
 static void state_handler_init(uint32_t message_id, struct gecko_cmd_packet *event, bool entry);
 static void state_handler_discovery(uint32_t message_id, struct gecko_cmd_packet *event, bool entry);
 static void state_handler_connect(uint32_t message_id, struct gecko_cmd_packet *event, bool entry);
 static void state_handler_service_discovery(uint32_t message_id, struct gecko_cmd_packet *event, bool entry);
 static void state_handler_characteristic_discovery(uint32_t message_id, struct gecko_cmd_packet *event, bool entry);
+static void state_handler_subscribe_characteristics(uint32_t message_id, struct gecko_cmd_packet *event, bool entry);
 static void state_handler_read_characteristics(uint32_t message_id, struct gecko_cmd_packet *event, bool entry);
 
+SensorValues _sensor_values = {0};
 static bool _system_ready = FALSE;
 static AppState _state = STATE_INIT;
 static ThunderBoardDevice _thunderboard = {0};
@@ -27,9 +31,15 @@ static state_handler _state_handlers[NUM_STATES] = {&state_handler_init,
                                                     &state_handler_connect,
                                                     &state_handler_service_discovery,
                                                     &state_handler_characteristic_discovery,
+                                                    &state_handler_subscribe_characteristics,
                                                     &state_handler_read_characteristics};
-static char *_state_names[] = {
-    "INIT", "DISCOVERY", "CONNECT", "DISCOVER SERVICES", "DISCOVER CHARACTERISTICS", "READ CHARACTERISTIC VALUES"};
+static char *_state_names[NUM_STATES] = {"INIT",
+                                         "DISCOVERY",
+                                         "CONNECT",
+                                         "DISCOVER SERVICES",
+                                         "DISCOVER CHARACTERISTICS",
+                                         "SUBSCRIBE CHARACTERISTICS",
+                                         "READ CHARACTERISTIC VALUES"};
 
 void handle_event(struct gecko_cmd_packet *event) {
     if (event == NULL) {
@@ -83,6 +93,18 @@ static void print_message_info(struct gecko_cmd_packet *event) {
         case gecko_evt_le_connection_opened_id:
             printf("gecko_evt_le_connection_opened_id");
             break;
+        case gecko_evt_gatt_server_user_write_request_id:
+            printf("gecko_evt_gatt_server_user_write_request_id");
+            break;
+        case gecko_evt_le_connection_parameters_id:
+            printf("gecko_evt_le_connection_parameters_id");
+            break;
+        case gecko_evt_le_connection_phy_status_id:
+            printf("gecko_evt_le_connection_phy_status_id");
+            break;
+        case gecko_evt_le_connection_closed_id:
+            printf("gecko_evt_le_connection_closed_id");
+            break;
         default:
             printf("UNKNOWN");
             break;
@@ -121,8 +143,57 @@ static void print_characteristic(struct gecko_msg_gatt_characteristic_evt_t *cha
     printf("\n\n");
 }
 
+static Characteristic *get_characteristic_by_handle(uint16_t handle) {
+    Characteristic *requested_characteristic = NULL;
+    uint16_t sensor_index = 0;
+
+    for (sensor_index = 0; sensor_index < NUM_THUNDERBOARD_SENSORS; sensor_index++) {
+        if (_thunderboard.all_sensors[sensor_index]->characteristic == handle) {
+            requested_characteristic = _thunderboard.all_sensors[sensor_index];
+            break;
+        }
+    }
+
+    return requested_characteristic;
+}
+
 static void initialize_thunderboard() {
     _thunderboard.initialized = TRUE;
+
+    return;
+}
+
+static double translate_value(double value, double input_range_min, double input_range_max, double output_range_min,
+                              double output_range_max) {
+    double input_span = input_range_max - input_range_min;
+    double output_span = output_range_max - output_range_min;
+
+    double scaled_value = (value - input_range_min) / input_span;
+
+    return output_range_min + (scaled_value * output_span);
+}
+
+static void refresh_sensor_values() {
+    _sensor_values.id++;
+
+    _sensor_values.temperature = ((double)(*((int16_t *)_thunderboard.temperature_sensor->value))) * 0.01;
+    _sensor_values.pressure = ((double)(*((uint32_t *)_thunderboard.pressure_sensor->value)) * 0.1);
+    _sensor_values.humidity = ((double)(*((uint16_t *)_thunderboard.humidity_sensor->value)) * 0.01);
+    _sensor_values.co2 = (double)(*((uint16_t *)_thunderboard.co2_sensor->value));
+    _sensor_values.voc = ((double)(*((uint16_t *)_thunderboard.voc_sensor->value)) * 0.01);
+    _sensor_values.light = ((double)(*((uint32_t *)_thunderboard.light_sensor->value)) * 0.001);
+    _sensor_values.sound = ((double)(*((uint16_t *)_thunderboard.sound_sensor->value)) * 0.01);
+
+    _sensor_values.acceleration[0] = ((double)(*((uint16_t *)(_thunderboard.acceleration_sensor->value + 0)))) * 0.001;
+    _sensor_values.acceleration[1] = ((double)(*((uint16_t *)(_thunderboard.acceleration_sensor->value + 2)))) * 0.001;
+    _sensor_values.acceleration[2] = ((double)(*((uint16_t *)(_thunderboard.acceleration_sensor->value + 4)))) * 0.001;
+
+    _sensor_values.orientation[0] =
+        translate_value(*((uint16_t *)(_thunderboard.orientation_sensor->value + 0)), INT16_MIN, INT16_MAX, -180, 180);
+    _sensor_values.orientation[1] =
+        translate_value(*((uint16_t *)(_thunderboard.orientation_sensor->value + 2)), INT16_MIN, INT16_MAX, -90, 90);
+    _sensor_values.orientation[2] =
+        translate_value(*((uint16_t *)(_thunderboard.orientation_sensor->value + 4)), INT16_MIN, INT16_MAX, -180, 180);
 
     return;
 }
@@ -146,17 +217,9 @@ static bool handle_advertisement(struct gecko_cmd_packet *event) {
             case 0x09:  // Complete Local Name
                 memcpy(name_buffer, &data[offset + 2], length - 1);
                 name_buffer[length] = '\0';
-                // printf("Device Name:\n  %s\n", device.name);
-                break;
-
-            case 0xFF:
-                // printf("Manufacturer Data\n");
-                // printf("  %02X %02X %02X %02X\n", data[offset + 2],
-                // data[offset + 3], data[offset + 4], data[offset + 5]);
                 break;
 
             default:
-                // printf("Unhandled Type: %02X\n", type);
                 break;
         }
 
@@ -221,6 +284,8 @@ static void state_handler_discovery(uint32_t message_id, struct gecko_cmd_packet
         struct gecko_msg_le_gap_set_discovery_type_rsp_t *set_discovery_response;
         struct gecko_msg_le_gap_start_discovery_rsp_t *start_discovery_response;
 
+        memset(&_thunderboard, 0, sizeof(_thunderboard));
+
         set_discovery_response = gecko_cmd_le_gap_set_discovery_type(le_gap_phy_1m, 0);
         if (set_discovery_response->result == 0) {
             start_discovery_response = gecko_cmd_le_gap_start_discovery(le_gap_phy_1m, le_gap_general_discoverable);
@@ -279,6 +344,10 @@ static void state_handler_connect(uint32_t message_id, struct gecko_cmd_packet *
             handle_state_transition(STATE_DISCOVER_SERVICES);
             break;
 
+        case gecko_evt_le_connection_closed_id:
+            handle_state_transition(STATE_DISCOVERY);
+            break;
+
         default:
             printf("*********************************\n");
             printf("     WARNING: Unhandled Event    \n");
@@ -312,6 +381,10 @@ static void state_handler_service_discovery(uint32_t message_id, struct gecko_cm
 
         case gecko_evt_gatt_procedure_completed_id:
             handle_state_transition(STATE_DISCOVER_CHARACTERISTICS);
+            break;
+
+        case gecko_evt_le_connection_closed_id:
+            handle_state_transition(STATE_DISCOVERY);
             break;
 
         default:
@@ -350,73 +423,94 @@ static void state_handler_characteristic_discovery(uint32_t message_id, struct g
                    event->data.evt_gatt_characteristic.uuid.len);
             new_characteristic->uuid.length = event->data.evt_gatt_characteristic.uuid.len;
 
-            if (_thunderboard.temperature_sensor == NULL) {
-                uint8_t temperature_uuid[] = {0x6E, 0x2A};
-                if (new_characteristic->uuid.length == sizeof(temperature_uuid) &&
-                    memcmp(temperature_uuid, new_characteristic->uuid.bytes, sizeof(temperature_uuid)) == 0) {
-                    _thunderboard.temperature_sensor = new_characteristic;
+            do {
+                if (_thunderboard.temperature_sensor == NULL) {
+                    uint8_t temperature_uuid[] = {0x6E, 0x2A};
+                    if (new_characteristic->uuid.length == sizeof(temperature_uuid) &&
+                        memcmp(temperature_uuid, new_characteristic->uuid.bytes, sizeof(temperature_uuid)) == 0) {
+                        _thunderboard.temperature_sensor = new_characteristic;
+                        break;
+                    }
                 }
-            } else if (_thunderboard.pressure_sensor == NULL) {
-                uint8_t pressure_uuid[] = {0x6D, 0x2A};
-                if (new_characteristic->uuid.length == sizeof(pressure_uuid) &&
-                    memcmp(pressure_uuid, new_characteristic->uuid.bytes, sizeof(pressure_uuid)) == 0) {
-                    _thunderboard.pressure_sensor = new_characteristic;
+                if (_thunderboard.pressure_sensor == NULL) {
+                    uint8_t pressure_uuid[] = {0x6D, 0x2A};
+                    if (new_characteristic->uuid.length == sizeof(pressure_uuid) &&
+                        memcmp(pressure_uuid, new_characteristic->uuid.bytes, sizeof(pressure_uuid)) == 0) {
+                        _thunderboard.pressure_sensor = new_characteristic;
+                        break;
+                    }
                 }
-            } else if (_thunderboard.humidity_sensor == NULL) {
-                uint8_t humidity_uuid[] = {0x6F, 0x2A};
-                if (new_characteristic->uuid.length == sizeof(humidity_uuid) &&
-                    memcmp(humidity_uuid, new_characteristic->uuid.bytes, sizeof(humidity_uuid)) == 0) {
-                    _thunderboard.humidity_sensor = new_characteristic;
+                if (_thunderboard.humidity_sensor == NULL) {
+                    uint8_t humidity_uuid[] = {0x6F, 0x2A};
+                    if (new_characteristic->uuid.length == sizeof(humidity_uuid) &&
+                        memcmp(humidity_uuid, new_characteristic->uuid.bytes, sizeof(humidity_uuid)) == 0) {
+                        _thunderboard.humidity_sensor = new_characteristic;
+                        break;
+                    }
                 }
-            } else if (_thunderboard.uv_sensor == NULL) {
-                uint8_t uv_uuid[] = {0x76, 0x2A};
-                if (new_characteristic->uuid.length == sizeof(uv_uuid) &&
-                    memcmp(uv_uuid, new_characteristic->uuid.bytes, sizeof(uv_uuid)) == 0) {
-                    _thunderboard.uv_sensor = new_characteristic;
+                if (_thunderboard.uv_sensor == NULL) {
+                    uint8_t uv_uuid[] = {0x76, 0x2A};
+                    if (new_characteristic->uuid.length == sizeof(uv_uuid) &&
+                        memcmp(uv_uuid, new_characteristic->uuid.bytes, sizeof(uv_uuid)) == 0) {
+                        _thunderboard.uv_sensor = new_characteristic;
+                        break;
+                    }
                 }
-            } else if (_thunderboard.co2_sensor == NULL) {
-                uint8_t co2_uuid[] = {0x3B, 0x10, 0x19, 0x00, 0xB0, 0x91, 0xE7, 0x76,
-                                      0x33, 0xEF, 0x01, 0xC4, 0xAE, 0x58, 0xD6, 0xEF};
-                if (new_characteristic->uuid.length == sizeof(co2_uuid) &&
-                    memcmp(co2_uuid, new_characteristic->uuid.bytes, sizeof(co2_uuid)) == 0) {
-                    _thunderboard.co2_sensor = new_characteristic;
+                if (_thunderboard.co2_sensor == NULL) {
+                    uint8_t co2_uuid[] = {0x3B, 0x10, 0x19, 0x00, 0xB0, 0x91, 0xE7, 0x76,
+                                          0x33, 0xEF, 0x01, 0xC4, 0xAE, 0x58, 0xD6, 0xEF};
+                    if (new_characteristic->uuid.length == sizeof(co2_uuid) &&
+                        memcmp(co2_uuid, new_characteristic->uuid.bytes, sizeof(co2_uuid)) == 0) {
+                        _thunderboard.co2_sensor = new_characteristic;
+                        break;
+                    }
                 }
-            } else if (_thunderboard.voc_sensor == NULL) {
-                uint8_t voc_uuid[] = {0x3B, 0x10, 0x19, 0x0,  0xB0, 0x91, 0xE7, 0x76,
-                                      0x33, 0xEF, 0x2,  0xC4, 0xAE, 0x58, 0xD6, 0xEF};
-                if (new_characteristic->uuid.length == sizeof(voc_uuid) &&
-                    memcmp(voc_uuid, new_characteristic->uuid.bytes, sizeof(voc_uuid)) == 0) {
-                    _thunderboard.voc_sensor = new_characteristic;
+                if (_thunderboard.voc_sensor == NULL) {
+                    uint8_t voc_uuid[] = {0x3B, 0x10, 0x19, 0x0,  0xB0, 0x91, 0xE7, 0x76,
+                                          0x33, 0xEF, 0x2,  0xC4, 0xAE, 0x58, 0xD6, 0xEF};
+                    if (new_characteristic->uuid.length == sizeof(voc_uuid) &&
+                        memcmp(voc_uuid, new_characteristic->uuid.bytes, sizeof(voc_uuid)) == 0) {
+                        _thunderboard.voc_sensor = new_characteristic;
+                        break;
+                    }
                 }
-            } else if (_thunderboard.light_sensor == NULL) {
-                uint8_t light_uuid[] = {0x2E, 0xA3, 0xF4, 0x54, 0x87, 0x9F, 0xDE, 0x8D,
-                                        0xEB, 0x45, 0xD9, 0xBF, 0x13, 0x69, 0x54, 0xC8};
-                if (new_characteristic->uuid.length == sizeof(light_uuid) &&
-                    memcmp(light_uuid, new_characteristic->uuid.bytes, sizeof(light_uuid)) == 0) {
-                    _thunderboard.light_sensor = new_characteristic;
+                if (_thunderboard.light_sensor == NULL) {
+                    uint8_t light_uuid[] = {0x2E, 0xA3, 0xF4, 0x54, 0x87, 0x9F, 0xDE, 0x8D,
+                                            0xEB, 0x45, 0xD9, 0xBF, 0x13, 0x69, 0x54, 0xC8};
+                    if (new_characteristic->uuid.length == sizeof(light_uuid) &&
+                        memcmp(light_uuid, new_characteristic->uuid.bytes, sizeof(light_uuid)) == 0) {
+                        _thunderboard.light_sensor = new_characteristic;
+                        break;
+                    }
                 }
-            } else if (_thunderboard.sound_sensor == NULL) {
-                uint8_t sound_uuid[] = {0x2E, 0xA3, 0xF4, 0x54, 0x87, 0x9F, 0xDE, 0x8D,
-                                        0xEB, 0x45, 0x2,  0xBF, 0x13, 0x69, 0x54, 0xC8};
-                if (new_characteristic->uuid.length == sizeof(sound_uuid) &&
-                    memcmp(sound_uuid, new_characteristic->uuid.bytes, sizeof(sound_uuid)) == 0) {
-                    _thunderboard.sound_sensor = new_characteristic;
+                if (_thunderboard.sound_sensor == NULL) {
+                    uint8_t sound_uuid[] = {0x2E, 0xA3, 0xF4, 0x54, 0x87, 0x9F, 0xDE, 0x8D,
+                                            0xEB, 0x45, 0x2,  0xBF, 0x13, 0x69, 0x54, 0xC8};
+                    if (new_characteristic->uuid.length == sizeof(sound_uuid) &&
+                        memcmp(sound_uuid, new_characteristic->uuid.bytes, sizeof(sound_uuid)) == 0) {
+                        _thunderboard.sound_sensor = new_characteristic;
+                        break;
+                    }
                 }
-            } else if (_thunderboard.acceleration_sensor == NULL) {
-                uint8_t acceleration_uuid[] = {0x9F, 0xDC, 0x9C, 0x81, 0xFF, 0xFE, 0x5D, 0x88,
-                                               0xE5, 0x11, 0xE5, 0x4B, 0xE2, 0xF6, 0xC1, 0xC4};
-                if (new_characteristic->uuid.length == sizeof(acceleration_uuid) &&
-                    memcmp(acceleration_uuid, new_characteristic->uuid.bytes, sizeof(acceleration_uuid)) == 0) {
-                    _thunderboard.acceleration_sensor = new_characteristic;
+                if (_thunderboard.acceleration_sensor == NULL) {
+                    uint8_t acceleration_uuid[] = {0x9F, 0xDC, 0x9C, 0x81, 0xFF, 0xFE, 0x5D, 0x88,
+                                                   0xE5, 0x11, 0xE5, 0x4B, 0xE2, 0xF6, 0xC1, 0xC4};
+                    if (new_characteristic->uuid.length == sizeof(acceleration_uuid) &&
+                        memcmp(acceleration_uuid, new_characteristic->uuid.bytes, sizeof(acceleration_uuid)) == 0) {
+                        _thunderboard.acceleration_sensor = new_characteristic;
+                        break;
+                    }
                 }
-            } else if (_thunderboard.orientation_sensor == NULL) {
-                uint8_t orientation_uuid[] = {0x9A, 0xF4, 0x94, 0xE9, 0xB5, 0xF3, 0x9F, 0xBA,
-                                              0xDD, 0x45, 0xE3, 0xBE, 0x94, 0xB6, 0xC4, 0xB7};
-                if (new_characteristic->uuid.length == sizeof(orientation_uuid) &&
-                    memcmp(orientation_uuid, new_characteristic->uuid.bytes, sizeof(orientation_uuid)) == 0) {
-                    _thunderboard.orientation_sensor = new_characteristic;
+                if (_thunderboard.orientation_sensor == NULL) {
+                    uint8_t orientation_uuid[] = {0x9A, 0xF4, 0x94, 0xE9, 0xB5, 0xF3, 0x9F, 0xBA,
+                                                  0xDD, 0x45, 0xE3, 0xBE, 0x94, 0xB6, 0xC4, 0xB7};
+                    if (new_characteristic->uuid.length == sizeof(orientation_uuid) &&
+                        memcmp(orientation_uuid, new_characteristic->uuid.bytes, sizeof(orientation_uuid)) == 0) {
+                        _thunderboard.orientation_sensor = new_characteristic;
+                        break;
+                    }
                 }
-            }
+            } while (0);
         } break;
 
         case gecko_evt_gatt_procedure_completed_id: {
@@ -430,7 +524,7 @@ static void state_handler_characteristic_discovery(uint32_t message_id, struct g
                     exit(EXIT_FAILURE);
                 }
             } else {
-                handle_state_transition(STATE_READ_CHARACTERISTIC_VALUES);
+                handle_state_transition(STATE_SUBSCRIBE_CHARACTERISTICS);
             }
         } break;
 
@@ -444,10 +538,69 @@ static void state_handler_characteristic_discovery(uint32_t message_id, struct g
     return;
 }
 
+static void state_handler_subscribe_characteristics(uint32_t message_id, struct gecko_cmd_packet *event, bool entry) {
+    static uint32_t subscribe_sensor_index = 0;
+
+    if (entry) {
+        for (subscribe_sensor_index = 0; subscribe_sensor_index < NUM_THUNDERBOARD_SENSORS; subscribe_sensor_index++) {
+            if (_thunderboard.all_sensors[subscribe_sensor_index] != NULL &&
+                (_thunderboard.all_sensors[subscribe_sensor_index]->properties.notify ||
+                 _thunderboard.all_sensors[subscribe_sensor_index]->properties.indicate)) {
+                struct gecko_msg_gatt_set_characteristic_notification_rsp_t *response =
+                    gecko_cmd_gatt_set_characteristic_notification(
+                        _thunderboard.connection, _thunderboard.all_sensors[subscribe_sensor_index]->characteristic, 3);
+                if (response->result != 0) {
+                    printf("ERROR: gecko_msg_gatt_server_write_attribute_value_rsp_t failed - %d\n", response->result);
+                    exit(EXIT_FAILURE);
+                }
+                break;
+            }
+        }
+
+        return;
+    }
+
+    switch (message_id) {
+        case gecko_evt_gatt_procedure_completed_id: {
+            subscribe_sensor_index++;
+            for (; subscribe_sensor_index < NUM_THUNDERBOARD_SENSORS; subscribe_sensor_index++) {
+                if (_thunderboard.all_sensors[subscribe_sensor_index] != NULL &&
+                    (_thunderboard.all_sensors[subscribe_sensor_index]->properties.notify ||
+                     _thunderboard.all_sensors[subscribe_sensor_index]->properties.indicate)) {
+                    struct gecko_msg_gatt_set_characteristic_notification_rsp_t *response =
+                        gecko_cmd_gatt_set_characteristic_notification(
+                            _thunderboard.connection, _thunderboard.all_sensors[subscribe_sensor_index]->characteristic,
+                            3);
+                    if (response->result != 0) {
+                        printf("ERROR: gecko_msg_gatt_server_write_attribute_value_rsp_t failed - %d\n",
+                               response->result);
+                        exit(EXIT_FAILURE);
+                    }
+                    break;
+                }
+            }
+            if (subscribe_sensor_index >= NUM_THUNDERBOARD_SENSORS) {
+                handle_state_transition(STATE_READ_CHARACTERISTIC_VALUES);
+            }
+        } break;
+
+        default:
+            printf("*********************************\n");
+            printf("     WARNING: Unhandled Event    \n");
+            printf("*********************************\n");
+            break;
+    }
+}
+
 static void state_handler_read_characteristics(uint32_t message_id, struct gecko_cmd_packet *event, bool entry) {
     static uint32_t sensor_index = 0;
 
     if (entry) {
+        uint32_t i;
+        for (i = 0; i < NUM_THUNDERBOARD_SENSORS; i++) {
+            printf("all_sensors[%u]: %p\n", i, _thunderboard.all_sensors[i]);
+        }
+
         for (sensor_index = 0; sensor_index < NUM_THUNDERBOARD_SENSORS; sensor_index++) {
             if (_thunderboard.all_sensors[sensor_index] != NULL) {
                 struct gecko_msg_gatt_read_characteristic_value_rsp_t *response =
@@ -466,18 +619,28 @@ static void state_handler_read_characteristics(uint32_t message_id, struct gecko
     }
 
     switch (message_id) {
-        case gecko_evt_gatt_characteristic_value_id:
+        case gecko_evt_gatt_characteristic_value_id: {
             printf("Got Characteristic value\n");
-            print_buffer(event->data.evt_gatt_characteristic_value.value.len,
-                         event->data.evt_gatt_characteristic_value.value.data, FALSE);
-            memcpy(_thunderboard.all_sensors[sensor_index]->value, event->data.evt_gatt_characteristic_value.value.data,
-                   event->data.evt_gatt_characteristic_value.value.len);
-            _thunderboard.all_sensors[sensor_index]->value_length = event->data.evt_gatt_characteristic_value.value.len;
-            break;
+            Characteristic *current_characteristic =
+                get_characteristic_by_handle(event->data.evt_gatt_characteristic_value.characteristic);
+            if (current_characteristic == NULL) {
+                printf("ERROR: get_characteristic_by_handle returned NULL\n");
+            } else {
+                memcpy(current_characteristic->value, event->data.evt_gatt_characteristic_value.value.data,
+                       event->data.evt_gatt_characteristic_value.value.len);
+                current_characteristic->value_length = event->data.evt_gatt_characteristic_value.value.len;
+                if (current_characteristic->characteristic ==
+                    event->data.evt_gatt_characteristic_value.characteristic) {
+                    sensor_index++;
+                }
+            }
+        } break;
 
         case gecko_evt_gatt_procedure_completed_id:
             for (; sensor_index < NUM_THUNDERBOARD_SENSORS; sensor_index++) {
-                if (_thunderboard.all_sensors[sensor_index] != NULL) {
+                if (_thunderboard.all_sensors[sensor_index] == NULL) {
+                    printf("WARNING: NULL Sensor at index %d\n", sensor_index);
+                } else if (_thunderboard.all_sensors[sensor_index]->properties.read) {
                     struct gecko_msg_gatt_read_characteristic_value_rsp_t *response =
                         gecko_cmd_gatt_read_characteristic_value(
                             _thunderboard.connection, _thunderboard.all_sensors[sensor_index]->characteristic);
@@ -490,8 +653,15 @@ static void state_handler_read_characteristics(uint32_t message_id, struct gecko
             }
 
             if (sensor_index >= NUM_THUNDERBOARD_SENSORS) {
-                printf("\nDONE\n");
-                exit(EXIT_SUCCESS);
+                sensor_index = 0;
+                refresh_sensor_values();
+                struct gecko_msg_gatt_read_characteristic_value_rsp_t *response =
+                    gecko_cmd_gatt_read_characteristic_value(_thunderboard.connection,
+                                                             _thunderboard.all_sensors[sensor_index]->characteristic);
+                if (response->result != 0) {
+                    printf("ERROR: gecko_cmd_gatt_read_characteristic_value failed - 0x%X\n", response->result);
+                    exit(EXIT_FAILURE);
+                }
             }
             break;
     }

@@ -20,6 +20,7 @@ typedef enum AppState {
     STATE_CONNECT,
     STATE_DISCOVER_SERVICES,
     STATE_DISCOVER_CHARACTERISTICS,
+    STATE_SUBSCRIBE_CHARACTERISTICS,
     STATE_READ_CHARACTERISTIC_VALUES,
 
     NUM_STATES
@@ -88,6 +89,19 @@ typedef struct ThunderBoardDevice {
     };
 
 } ThunderBoardDevice;
+
+typedef struct SensorValues {
+    uint32_t id;
+    double temperature;
+    double pressure;
+    double humidity;
+    double co2;
+    double voc;
+    double light;
+    double sound;
+    double acceleration[3];
+    double orientation[3];
+} SensorValues;
 
 void handle_event(struct gecko_cmd_packet *event);
 

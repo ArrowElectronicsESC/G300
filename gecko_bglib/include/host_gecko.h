@@ -3516,10 +3516,9 @@ static inline struct gecko_msg_le_gap_set_data_channel_classification_rsp_t* gec
 * gecko_cmd_le_gap_connect
 *
 * This command can be used to connect an advertising device with the
-* specified initiating PHY.                 The Bluetooth stack will
-* enter a state where it continuously                 scans for the
-* connectable advertising packets from the remote                 device
-* which matches the Bluetooth address given as a
+* specified initiating PHY.The Bluetooth stack will enter a state
+* where it continuously scans for the connectable advertising packets
+* from the remote device which matches the Bluetooth address given as a
 * parameter. Upon receiving the advertising packet, the module
 * will send a connection request packet to the target device to
 * initiate a Bluetooth connection. To cancel an ongoing
@@ -3534,7 +3533,10 @@ static inline struct gecko_msg_le_gap_set_data_channel_classification_rsp_t* gec
 * max_connections value configured.
 * This command fails with "Invalid Parameter" error if the initiating
 * PHY value is invalid or the device does not support the PHY.
-* Later calls of this command have to wait for the ongoing command                  to complete. A received event                   "le_connection_opened"                  indicates connection opened successfully and a received event                 "le_connection_closed"                  indicates connection failures have occurred.              
+* Later calls of this command have to wait for the ongoing command to
+* complete. A received event "le_connection_opened" indicates connection
+* opened successfully and a received event "le_connection_closed" indicates
+* connection failures have occurred.              
 *
 * @param address   Address of the device to connect to
 * @param address_type   Address type of the device to connect to

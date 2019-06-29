@@ -1,0 +1,17 @@
+export WORK_ROOT=/home/andrew/XCompile
+export TOOLCHAIN_ROOT=$WORK_ROOT/openwrt-sdk-18.06.1-ramips-mt76x8_gcc-7.3.0_musl.Linux-x86_64/staging_dir
+export TOOLCHAIN_SYSROOT=$TOOLCHAIN_ROOT/toolchain-mipsel_24kc_gcc-7.3.0_musl
+export TOOLCHAIN_EXES=$TOOLCHAIN_SYSROOT/bin
+export TOOLCHAIN_NAME=mipsel-openwrt-linux-musl
+export AR=$TOOLCHAIN_EXES/$TOOLCHAIN_NAME-ar
+export AS=$TOOLCHAIN_EXES/$TOOLCHAIN_NAME-as
+export CC=$TOOLCHAIN_EXES/$TOOLCHAIN_NAME-gcc
+export LD=$TOOLCHAIN_EXES/$TOOLCHAIN_NAME-ld
+export NM=$TOOLCHAIN_EXES/$TOOLCHAIN_NAME-nm
+export RANLIB=$TOOLCHAIN_EXES/$TOOLCHAIN_NAME-ranlib
+
+export LDFLAGS="-L${TOOLCHAIN_SYSROOT}/usr/lib"
+export LIBS="-lssl -lcrypto -ldl -lpthread"
+export TOOLCHAIN_PREFIX=$TOOLCHAIN_SYSROOT/usr
+export STAGING_DIR=$TOOLCHAIN_SYSROOT
+export LC_ALL=C

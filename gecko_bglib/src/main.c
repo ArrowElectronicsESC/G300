@@ -1,5 +1,6 @@
 #include "main.h"
 
+#include <curl/curl.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,6 +23,38 @@ int main(int argc, char **argv) {
     char *serial_port;
     struct gecko_cmd_packet *event;
 
+    CURL *curl;
+
+    CURLcode res;
+
+    curl = curl_easy_init();
+
+    printf("Hello!\n");
+    if (curl) {
+        printf("Curl easy init passed!\n");
+        curl_easy_setopt(curl, CURLOPT_URL, argv[1]);
+
+        curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+
+        res = curl_easy_perform(curl);
+
+        if (res != CURLE_OK) {
+            printf("curl_easy_perform failed\n");
+            return -1;
+        } else {
+            printf("Success!!\n");
+        }
+
+        curl_easy_cleanup(curl);
+
+    } else {
+        printf("curl_easy_init failed\n");
+        return -2;
+    }
+
+    printf("goodbye!");
+
+#if 0
     BGLIB_INITIALIZE_NONBLOCK(serial_write, uartRx, uartRxPeek);
 
     get_parameters(argc, argv, &baudrate, &serial_port);
@@ -44,7 +77,7 @@ int main(int argc, char **argv) {
             upload_sensor_values();
         }
     }
-
+#endif
     return 0;
 }
 

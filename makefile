@@ -1,18 +1,30 @@
 
-CFLAGS = -Iinclude
-SOURCES = src/main.c src/cmd_def.c src/ble_handlers.c src/stubs.c
-CC = /opt/buildroot-gcc463/usr/bin/mipsel-linux-gcc
+CC=/home/andrew/XCompile/openwrt-sdk-18.06.1-ramips-mt76x8_gcc-7.3.0_musl.Linux-x86_64/staging_dir/toolchain-mipsel_24kc_gcc-7.3.0_musl/bin/mipsel-openwrt-linux-musl-gcc
 
-all:g300
+CFLAGS=-static -Wall
 
-g300:	
-	$(CC) $(CFLAGS) $(SOURCES) -o g300demo
+INCLUDES=-Igecko_bglib/include
 
-linux:
-	gcc $(CFLAGS) $(SOURCES) -o g300demo
+LFLAGS=
 
-serial:
-	$(CC) src/serial_test.c -o serial_test
+LIBS=libcurl.a libssl.a libcrypto.a
 
-gecko:
-	$(CC) -Wall gecko_bglib/src/main.c gecko_bglib/src/app.c gecko_bglib/src/uart_posix.c gecko_bglib/src/gecko_bglib.c -Igecko_bglib/include -o g300demo
+SRC=gecko_bglib/src/main.c gecko_bglib/src/app.c gecko_bglib/src/uart_posix.c gecko_bglib/src/gecko_bglib.c
+
+OBJ=$(SRC:.c=.o)
+
+MAIN=g300demo
+
+RM=rm -rf
+
+.c.o:
+	$(CC) $(CFLAGS) $(INCLUDES) -c $<  -o $@
+
+$(MAIN): $(OBJ)
+	$(CC) $(CFLAGS) $(INCLUDES) -o $(MAIN) $(OBJ) $(LFLAGS) $(LIBS)
+
+all: $(MAIN)
+
+clean: 
+
+	$(RM) $(MAIN) *.o *~

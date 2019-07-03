@@ -2,7 +2,7 @@
 #define __INCLUDE_AZURE_FUNCTIONS_H
 
 #define VERBOSE_CURL     1
-#define CONFIG_FILE_NAME "azure_config.json"
+#define CONFIG_FILE_NAME "/data/azure_config.json"
 #define CURL_BUFFER_SIZE (1024*256)
 
 
@@ -22,5 +22,6 @@ typedef struct AzureConfig {
 } AzureConfig;
 
 int azure_init();
+int azure_post_telemetry(char *json_string);
 
 #endif // __INCLUDE_AZURE_FUNCTIONS_H

@@ -1,4 +1,4 @@
-export WORK_ROOT=/home/andrew/XCompile
+export WORK_ROOT=/home/${USER}/XCompile
 export TOOLCHAIN_ROOT=$WORK_ROOT/openwrt-sdk-18.06.1-ramips-mt76x8_gcc-7.3.0_musl.Linux-x86_64/staging_dir
 export TOOLCHAIN_SYSROOT=$TOOLCHAIN_ROOT/toolchain-mipsel_24kc_gcc-7.3.0_musl
 export TOOLCHAIN_EXES=$TOOLCHAIN_SYSROOT/bin

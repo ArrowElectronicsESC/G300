@@ -54,7 +54,7 @@ void handle_event(struct gecko_cmd_packet *event) {
         _state_handlers[_state](message_id, event, FALSE);
     } else {
         printf("ERROR: Unhandled State: %d\n", _state);
-        exit(EXIT_FAILURE);
+        flash_led();
     }
 
     return;
@@ -248,7 +248,7 @@ static bool handle_advertisement(struct gecko_cmd_packet *event) {
 static void handle_state_transition(AppState new_state) {
     if (new_state >= NUM_STATES) {
         printf("ERROR: Unhandled State: %d\n", new_state);
-        exit(EXIT_FAILURE);
+        flash_led();
     }
 
     printf("===================================================\n");
@@ -291,11 +291,11 @@ static void state_handler_discovery(uint32_t message_id, struct gecko_cmd_packet
             start_discovery_response = gecko_cmd_le_gap_start_discovery(le_gap_phy_1m, le_gap_general_discoverable);
             if (start_discovery_response->result != 0) {
                 printf("ERROR: gecko_cmd_le_gap_start_discovery failure - %d\n", start_discovery_response->result);
-                exit(EXIT_FAILURE);
+                flash_led();
             }
         } else {
             printf("ERROR: gecko_cmd_le_gap_set_discovery_type failure - %d\n", set_discovery_response->result);
-            exit(EXIT_FAILURE);
+            flash_led();
         }
 
         return;
@@ -334,13 +334,14 @@ static void state_handler_connect(uint32_t message_id, struct gecko_cmd_packet *
             _thunderboard.connection = response->connection;
         } else {
             printf("ERROR: gecko_cmd_le_gap_connect failed - 0x%X\n", response->result);
-            exit(EXIT_FAILURE);
+            flash_led();
         }
         return;
     }
 
     switch (message_id) {
         case gecko_evt_le_connection_opened_id:
+            set_led_color(LED_GREEN);
             handle_state_transition(STATE_DISCOVER_SERVICES);
             break;
 
@@ -364,7 +365,7 @@ static void state_handler_service_discovery(uint32_t message_id, struct gecko_cm
             gecko_cmd_gatt_discover_primary_services(_thunderboard.connection);
         if (response->result != 0) {
             printf("ERROR: gecko_cmd_gatt_discover_primary_services failed - 0x%X\n", response->result);
-            exit(EXIT_FAILURE);
+            flash_led();
         }
         return;
     }
@@ -374,7 +375,7 @@ static void state_handler_service_discovery(uint32_t message_id, struct gecko_cm
             printf("Found Service[%d]: %d\n", _thunderboard.services.length, event->data.evt_gatt_service.service);
             if (_thunderboard.services.length == MAX_NUM_SERVICES) {
                 printf("ERROR: Max Services Exceeded");
-                exit(1);
+                flash_led();
             }
             _thunderboard.services.list[_thunderboard.services.length++] = event->data.evt_gatt_service.service;
             break;
@@ -405,7 +406,7 @@ static void state_handler_characteristic_discovery(uint32_t message_id, struct g
             _thunderboard.connection, _thunderboard.services.list[service_index]);
         if (response->result != 0) {
             printf("ERROR: gecko_cmd_gatt_discover_characteristics failed - 0x%X\n", response->result);
-            exit(EXIT_FAILURE);
+            flash_led();
         }
 
         return;
@@ -521,7 +522,7 @@ static void state_handler_characteristic_discovery(uint32_t message_id, struct g
                                                             _thunderboard.services.list[service_index]);
                 if (response->result != 0) {
                     printf("ERROR: gecko_cmd_gatt_discover_characteristics failed - 0x%X\n", response->result);
-                    exit(EXIT_FAILURE);
+                    flash_led();
                 }
             } else {
                 handle_state_transition(STATE_SUBSCRIBE_CHARACTERISTICS);
@@ -551,7 +552,7 @@ static void state_handler_subscribe_characteristics(uint32_t message_id, struct 
                         _thunderboard.connection, _thunderboard.all_sensors[subscribe_sensor_index]->characteristic, 3);
                 if (response->result != 0) {
                     printf("ERROR: gecko_msg_gatt_server_write_attribute_value_rsp_t failed - %d\n", response->result);
-                    exit(EXIT_FAILURE);
+                    flash_led();
                 }
                 break;
             }
@@ -574,7 +575,7 @@ static void state_handler_subscribe_characteristics(uint32_t message_id, struct 
                     if (response->result != 0) {
                         printf("ERROR: gecko_msg_gatt_server_write_attribute_value_rsp_t failed - %d\n",
                                response->result);
-                        exit(EXIT_FAILURE);
+                        flash_led();
                     }
                     break;
                 }
@@ -608,7 +609,7 @@ static void state_handler_read_characteristics(uint32_t message_id, struct gecko
                                                              _thunderboard.all_sensors[sensor_index]->characteristic);
                 if (response->result != 0) {
                     printf("ERROR: gecko_cmd_gatt_read_characteristic_value failed - 0x%X\n", response->result);
-                    exit(EXIT_FAILURE);
+                    flash_led();
                 }
                 break;
             } else {
@@ -646,7 +647,7 @@ static void state_handler_read_characteristics(uint32_t message_id, struct gecko
                             _thunderboard.connection, _thunderboard.all_sensors[sensor_index]->characteristic);
                     if (response->result != 0) {
                         printf("ERROR: gecko_cmd_gatt_read_characteristic_value failed - 0x%X\n", response->result);
-                        exit(EXIT_FAILURE);
+                        flash_led();
                     }
                     break;
                 }
@@ -660,7 +661,7 @@ static void state_handler_read_characteristics(uint32_t message_id, struct gecko
                                                              _thunderboard.all_sensors[sensor_index]->characteristic);
                 if (response->result != 0) {
                     printf("ERROR: gecko_cmd_gatt_read_characteristic_value failed - 0x%X\n", response->result);
-                    exit(EXIT_FAILURE);
+                    flash_led();
                 }
             }
             break;

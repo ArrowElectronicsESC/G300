@@ -10,6 +10,15 @@
 
 typedef uint8_t bool;
 
+typedef enum {
+    LED_RED,
+    LED_GREEN,
+    LED_YELLOW,
+    LED_OFF
+} G300LedColor;
+
 void serial_write(uint32_t length, uint8_t* data);
+void set_led_color(G300LedColor color);
+void flash_led();
 
 #endif  // __INCLUDE_MAIN

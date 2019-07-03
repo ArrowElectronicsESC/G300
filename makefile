@@ -1,15 +1,28 @@
 
-CC=/home/andrew/XCompile/openwrt-sdk-18.06.1-ramips-mt76x8_gcc-7.3.0_musl.Linux-x86_64/staging_dir/toolchain-mipsel_24kc_gcc-7.3.0_musl/bin/mipsel-openwrt-linux-musl-gcc
-
 CFLAGS=-static -Wall
 
-INCLUDES=-Igecko_bglib/include
+INCLUDES=-Igecko_bglib/include -I$(TOOLCHAIN_SYSROOT)/usr/include/azureiot
 
-LFLAGS=
+LIBDIR=$(TOOLCHAIN_SYSROOT)/usr/lib/
 
-LIBS=libcurl.a libssl.a libcrypto.a
+LIBS=$(LIBDIR)/libiothub_client.a \
+$(LIBDIR)/libiothub_service_client.a \
+$(LIBDIR)/libiothub_client_http_transport.a \
+$(LIBDIR)/libserializer.a \
+$(LIBDIR)/libaziotsharedutil.a \
+$(LIBDIR)/libcurl.a \
+$(LIBDIR)/libssl.a \
+$(LIBDIR)/libcrypto.a \
+$(LIBDIR)/libz.a \
+$(LIBDIR)/libparson.a \
 
-SRC=gecko_bglib/src/main.c gecko_bglib/src/app.c gecko_bglib/src/uart_posix.c gecko_bglib/src/gecko_bglib.c
+SRCDIR=gecko_bglib/src
+
+SRC=$(SRCDIR)/main.c\
+$(SRCDIR)/app.c\
+$(SRCDIR)/uart_posix.c\
+$(SRCDIR)/gecko_bglib.c\
+$(SRCDIR)/azure_functions.c
 
 OBJ=$(SRC:.c=.o)
 

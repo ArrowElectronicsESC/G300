@@ -4,11 +4,14 @@
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
+
 
 #include "app.h"
 #include "bg_types.h"
 #include "gecko_bglib.h"
 #include "uart.h"
+#include "azure_functions.h"
 
 extern SensorValues _sensor_values;
 
@@ -23,44 +26,35 @@ int main(int argc, char **argv) {
     char *serial_port;
     struct gecko_cmd_packet *event;
 
-    CURL *curl;
-
     CURLcode res;
 
-    curl = curl_easy_init();
+    set_led_color(LED_RED);
+    usleep(300000);
+    set_led_color(LED_GREEN);
+    usleep(300000);
+    set_led_color(LED_YELLOW);
+    usleep(300000);
+    set_led_color(LED_GREEN);
+    usleep(300000);
+    set_led_color(LED_YELLOW);
 
-    printf("Hello!\n");
-    if (curl) {
-        printf("Curl easy init passed!\n");
-        curl_easy_setopt(curl, CURLOPT_URL, argv[1]);
-
-        curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-
-        res = curl_easy_perform(curl);
-
-        if (res != CURLE_OK) {
-            printf("curl_easy_perform failed\n");
-            return -1;
-        } else {
-            printf("Success!!\n");
-        }
-
-        curl_easy_cleanup(curl);
-
-    } else {
-        printf("curl_easy_init failed\n");
-        return -2;
+    res = curl_global_init(CURL_GLOBAL_ALL);
+    if (res) {
+      printf("curl_global_init failed\n");
+      flash_led();
     }
 
-    printf("goodbye!");
+    if (azure_init() != 0) {
+        printf("ERROR: Azure Init Failed.\n");
+        flash_led();
+    }
 
-#if 0
     BGLIB_INITIALIZE_NONBLOCK(serial_write, uartRx, uartRxPeek);
 
     get_parameters(argc, argv, &baudrate, &serial_port);
     if (uartOpen((int8_t *)serial_port, baudrate, 0, 100) < 0) {
         printf("ERROR: Serial Port Initialization Failed.\n");
-        exit(EXIT_FAILURE);
+        flash_led();
     }
 
     gecko_cmd_system_reset(0);
@@ -73,12 +67,40 @@ int main(int argc, char **argv) {
         }
 
         if (_sensor_values.id > last_reading_id) {
+            set_led_color(LED_YELLOW);
             last_reading_id = _sensor_values.id;
             upload_sensor_values();
+            set_led_color(LED_GREEN);
         }
     }
-#endif
+
     return 0;
+}
+
+void set_led_color(G300LedColor color) {
+    switch (color) {
+        case LED_RED:
+            system("usockc /var/gpio_ctrl WLAN_LED_RED");
+        break;
+        case LED_GREEN:
+            system("usockc /var/gpio_ctrl WLAN_LED_GREEN");
+        break;
+        case LED_YELLOW:
+            system("usockc /var/gpio_ctrl WLAN_LED_YELLOW");
+        break;
+        case LED_OFF:
+            system("usockc /var/gpio_ctrl WLAN_LED_OFF");
+        break;
+    }
+}
+
+void flash_led() {
+    while (1) {
+        set_led_color(LED_RED);
+        sleep(1);
+        set_led_color(LED_OFF);
+        sleep(1);
+    }
 }
 
 static void get_parameters(int argc, char **argv, uint32_t *baudrate, char **serial_port) {
@@ -91,7 +113,7 @@ static void get_parameters(int argc, char **argv, uint32_t *baudrate, char **ser
         *serial_port = argv[1];
     } else {
         printf(USAGE, argv[0]);
-        exit(EXIT_FAILURE);
+        flash_led();
     }
 
     printf("Baud Rate: %d\nSerial Port: %s\n", *baudrate, *serial_port);
@@ -119,4 +141,24 @@ static void upload_sensor_values() {
            _sensor_values.acceleration[2]);
     printf("  Orientation: (%f, %f, %f)\n", _sensor_values.orientation[0], _sensor_values.orientation[1],
            _sensor_values.orientation[2]);
+
+    char json_buffer[1024];
+    snprintf(json_buffer, 1024, "{\"temp\":%f,"
+    "\"press\":%f,"
+    "\"hum\":%f,"
+    "\"co2\":%f,"
+    "\"voc\":%f,"
+    "\"ambientlight\":%f,"
+    "\"sound\":%f,"
+    "\"accx\":%f,"
+    "\"accy\":%f,"
+    "\"accz\":%f,"
+    "\"orientationx\":%f,"
+    "\"orientationy\":%f,"
+    "\"orientationz\":%f}",
+    _sensor_values.temperature, _sensor_values.pressure, _sensor_values.humidity, _sensor_values.co2, _sensor_values.voc, _sensor_values.light,
+    _sensor_values.sound, _sensor_values.acceleration[0],_sensor_values.acceleration[1],_sensor_values.acceleration[2],
+    _sensor_values.orientation[0],_sensor_values.orientation[1],_sensor_values.orientation[2]);
+
+    azure_post_telemetry(json_buffer);
 }

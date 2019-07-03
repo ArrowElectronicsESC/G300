@@ -47,6 +47,13 @@ int azure_init() {
     return 0;
 }
 
+int azure_post_telemetry(char *json_string) {
+    snprintf(_url_buffer, DATA_BUFFER_SIZE, "https://%s/devices/%s/messages/events/?api-version=2016-11-14", _azure_config.host_name, _azure_config.device_id);
+    make_request("POST", _url_buffer, json_string, _azure_config.host_name, FALSE);
+    
+    return (_json_response == NULL) ? 0 : -1;
+}
+
 static int init_azure_config() {
     JSON_Value *root_value = json_parse_file(CONFIG_FILE_NAME);
 
@@ -164,10 +171,10 @@ size_t write_callback(char *ptr, size_t size, size_t nmemb, void *userdata) {
 static int get_auth_string(char *auth_buffer, char *scope, char *target, char *key_name) {
     unsigned long long expiration_timestamp = ((get_utc_ms_timestamp() + (7200 * 1000)) / 1000);
     char scope_string[128];
-    snprintf(scope_string, 128, "%s%%2f%s%%2f%s", _azure_config.scope_id, target, _azure_config.device_id);
+    snprintf(scope_string, 128, "%s%%2f%s%%2f%s", scope, target, _azure_config.device_id);
 
     STRING_HANDLE sas_token;
-    sas_token = SASToken_CreateString(_azure_config.primary_key, scope_string, "registration", expiration_timestamp);
+    sas_token = SASToken_CreateString(_azure_config.primary_key, scope_string, key_name, expiration_timestamp);
 
     sprintf(auth_buffer, "%s", STRING_c_str(sas_token));
 
@@ -196,6 +203,14 @@ int make_request(char *method, char *url, char *data, char *scope, bool dps) {
         res = CURLE_FAILED_INIT;
         printf("ERROR: Curl Init Failed\n");
         return -1;
+    }
+    
+    //char *ca_path = "/etc/cacert.pem";
+    res = curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0);
+    res = curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0);
+    if (res) {
+      printf("ERROR: Failed to set curl write func\n");
+      return -1;
     }
 
     res = curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
@@ -235,7 +250,7 @@ int make_request(char *method, char *url, char *data, char *scope, bool dps) {
     struct curl_slist *chunk = NULL;
     chunk = curl_slist_append(chunk, "accept: application/json");
     char content_length_header[64];
-    snprintf(content_length_header, 64, "Content-Length: %ld", data ? strlen(data) :0);
+    snprintf(content_length_header, 64, "Content-Length: %d", data ? strlen(data) :0);
     chunk = curl_slist_append(chunk, content_length_header);
     chunk = curl_slist_append(chunk, auth_header);
     chunk = curl_slist_append(chunk, "Content-Type: application/json");

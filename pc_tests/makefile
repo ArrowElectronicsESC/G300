@@ -7,7 +7,7 @@ CFLAGS= -Wall
 
 #INCLUDES=-I/home/andrew/Downloads/azure-iot-sdk-c/iothub_client/inc/ -I/home/andrew/Downloads/azure-iot-sdk-c/c-utility/inc/
 
-INCLUDES=-I/usr/local/include/azureiot/
+INCLUDES=-I/usr/local/include/azureiot/ -I.
 
 #LIBDIR=/home/andrew/XCompile/openwrt-sdk-18.06.0-ramips-mt76x8_gcc-7.3.0_musl.Linux-x86_64/staging_dir/toolchain-mipsel_24kc_gcc-7.3.0_musl/usr/lib/
 
@@ -32,13 +32,13 @@ LFLAGS=-m64
 #-uhttp -liothub_client -liothub_client_http_transport
 #LIBS=libcurl.a libssl.a libcrypto.a
 
-LIBS=-lcurl -ljson-c /usr/local/lib64/libaziotsharedutil.a -lm
+LIBS=-lcurl -ljson-c /usr/local/lib64/libaziotsharedutil.a /usr/local/lib64/libparson.a -lm
 
 #LIBS=$(LIBDIR)/libcurl.a
 
 #SRC=gecko_bglib/src/main.c gecko_bglib/src/app.c gecko_bglib/src/uart_posix.c gecko_bglib/src/gecko_bglib.c
 
-SRC=azure_curl_test.c
+SRC=azure_curl_test.c azure_functions.c
 
 OBJ=$(SRC:.c=.o)
 

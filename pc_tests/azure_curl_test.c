@@ -1,43 +1,23 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <sys/time.h>
+// #include <stdio.h>
+// #include <stdlib.h>
+// #include <string.h>
+// #include <sys/time.h>
+// #include <sys/types.h>
+// #include <sys/stat.h>
+// #include <fcntl.h>  
+
+// #include <stdint.h>
 #include <curl/curl.h>
-#include <json-c/json.h>
-#include <azureiot/azure_c_shared_utility/sastoken.h>
-#include <azureiot/azure_c_shared_utility/urlencode.h>
+// #include <azureiot/parson.h>
+// #include <azureiot/azure_c_shared_utility/sastoken.h>
+// #include <azureiot/azure_c_shared_utility/urlencode.h>
 
-
-
-#define DEVICE_ID "105d3088-c5ee-42c1-9f99-adc83f3202ba"
-#define SCOPE_ID "0ne00063ECA"
-#define PRIMARY_KEY "VTPzQ7XVpk0WbqjrTYvyK9crMZDNmDyXPnYOEvDCD90="
-#define BUFFER_SIZE (1024*256)
-char curl_buffer[BUFFER_SIZE] = {0};
-int buffer_offset = 0;
-
-
-
-size_t write_callback(char *ptr, size_t size, size_t nmemb, void *userdata) {
-    if (buffer_offset + nmemb > BUFFER_SIZE) {
-        printf("Too much data\n");
-        exit(1);
-    }
-
-    printf("Got data\n");
-
-    memcpy((curl_buffer + buffer_offset), ptr, nmemb);
-    buffer_offset += nmemb;
-}
-
-int get_operation_id() {
-
-}
+#include "azure_functions.h"
 
 int main(int argc, char *argv[]) {
-    CURL *curl = NULL;
+    //CURL *curl = NULL;
     CURLcode res = CURLE_OK;
-    json_object *new_obj;
+    //json_object *new_obj;
 
 
     res = curl_global_init(CURL_GLOBAL_ALL);
@@ -45,7 +25,7 @@ int main(int argc, char *argv[]) {
       printf("curl_global_init failed\n");
       return -1;
     }
-
+#if 0
     curl = curl_easy_init();
     if (!curl) {
         res = CURLE_FAILED_INIT;
@@ -131,8 +111,17 @@ int main(int argc, char *argv[]) {
     }
 
     curl_easy_cleanup(curl);
-
-    printf("RESPONSE:\n\n%s\n\n", curl_buffer);
-
+#endif
+    azure_init();
+/*
+    char postfields[512] = {0};
+    snprintf(postfields, 512, "{\"registrationId\":\"%s\"}", DEVICE_ID);
+    char address[512];
+    snprintf(address, 512, "https://global.azure-devices-provisioning.net/%s/registrations/%s/register?api-version=2018-11-01", SCOPE_ID, DEVICE_ID);
+    printf("\nURL: %s\n", address);
+    printf("\nDATA: %s\n", postfields);
+    make_request("PUT", address, postfields, SCOPE_ID, TRUE);
+    printf("RESPONSE:\n\n%s\n\n", _curl_buffer);
+*/
     return 0;
 }

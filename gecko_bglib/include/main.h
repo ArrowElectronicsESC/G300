@@ -8,8 +8,6 @@
 #define TRUE 1
 #define FALSE 0
 
-typedef uint8_t bool;
-
 typedef enum {
     LED_RED,
     LED_GREEN,

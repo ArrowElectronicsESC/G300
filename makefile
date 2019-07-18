@@ -22,7 +22,8 @@ SRC=$(SRCDIR)/main.c\
 $(SRCDIR)/app.c\
 $(SRCDIR)/uart_posix.c\
 $(SRCDIR)/gecko_bglib.c\
-$(SRCDIR)/azure_functions.c
+$(SRCDIR)/azure_functions.c\
+$(SRCDIR)/log.c
 
 OBJ=$(SRC:.c=.o)
 
@@ -40,4 +41,4 @@ all: $(MAIN)
 
 clean: 
 
-	$(RM) $(MAIN) *.o *~
+	$(RM) $(MAIN) gecko_bglib/src/*.o *~

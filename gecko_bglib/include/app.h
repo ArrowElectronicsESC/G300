@@ -9,8 +9,11 @@
 #define MAX_NAME_LENGTH 32
 #define MAX_NUM_SERVICES 32
 #define MAX_NUM_CHARACTERISTICS 64
-#define VALUE_PAYLOAD_LENGTH 8
+#define VALUE_PAYLOAD_LENGTH 64
 #define NUM_THUNDERBOARD_SENSORS 10
+#define ADVERTISEMENT_TIMEOUT_SECONDS (1 * 60)
+
+typedef uint8_t bool;
 
 typedef void (*state_handler)(uint32_t, struct gecko_cmd_packet *, bool);
 

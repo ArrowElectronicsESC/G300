@@ -3,7 +3,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <time.h>
 
+#include "log.h"
 #include "bg_types.h"
 #include "gecko_bglib.h"
 
@@ -13,6 +15,7 @@ static void print_message_info(struct gecko_cmd_packet *event);
 static bool handle_advertisement(struct gecko_cmd_packet *event);
 static void refresh_sensor_values();
 static Characteristic *get_characteristic_by_handle(uint16_t handle);
+static void bytes_to_hex_string(uint32_t length, uint8_t *data, bool reversed, char *buffer);
 
 static void state_handler_init(uint32_t message_id, struct gecko_cmd_packet *event, bool entry);
 static void state_handler_discovery(uint32_t message_id, struct gecko_cmd_packet *event, bool entry);
@@ -43,7 +46,7 @@ static char *_state_names[NUM_STATES] = {"INIT",
 
 void handle_event(struct gecko_cmd_packet *event) {
     if (event == NULL) {
-        printf("ERROR: NULL event pointer in state %s.\n", _state_names[_state]);
+        log_error("NULL event pointer in state %s.", _state_names[_state]);
     }
 
     print_message_info(event);
@@ -53,7 +56,7 @@ void handle_event(struct gecko_cmd_packet *event) {
     if (_state < NUM_STATES) {
         _state_handlers[_state](message_id, event, FALSE);
     } else {
-        printf("ERROR: Unhandled State: %d\n", _state);
+        log_error("Unhandled State: %d", _state);
         flash_led();
     }
 
@@ -63,84 +66,89 @@ void handle_event(struct gecko_cmd_packet *event) {
 static void print_message_info(struct gecko_cmd_packet *event) {
     uint32_t message_id = BGLIB_MSG_ID(event->header);
 
-    printf("\n\nMESSAGE\n  Header: 0x%X\n  Message ID: 0x%X\n", event->header, message_id);
+    log_trace("\n\nMESSAGE\n  Header: 0x%X\n  Message ID: 0x%X\n", event->header, message_id);
     if (event->header & gecko_msg_type_rsp) {
-        printf("  Type: RESPONSE\n");
+        log_trace("  Type: RESPONSE\n");
     } else if (event->header & gecko_msg_type_evt) {
-        printf("  Type: EVENT\n");
+        log_trace("  Type: EVENT\n");
     }
 
-    printf("  Name: ");
+    log_trace("  Name: ");
     switch (message_id) {
         case gecko_evt_system_boot_id:
-            printf("gecko_evt_system_boot_id");
+            log_trace("gecko_evt_system_boot_id");
             break;
         case gecko_evt_le_gap_scan_response_id:
-            printf("gecko_evt_le_gap_scan_response_id");
+            log_trace("gecko_evt_le_gap_scan_response_id");
             break;
         case gecko_evt_gatt_service_id:
-            printf("gecko_evt_gatt_service_id");
+            log_trace("gecko_evt_gatt_service_id");
             break;
         case gecko_evt_gatt_characteristic_id:
-            printf("gecko_evt_gatt_characteristic_id");
+            log_trace("gecko_evt_gatt_characteristic_id");
             break;
         case gecko_evt_gatt_procedure_completed_id:
-            printf("gecko_evt_gatt_procedure_completed_id");
+            log_trace("gecko_evt_gatt_procedure_completed_id");
             break;
         case gecko_evt_gatt_characteristic_value_id:
-            printf("gecko_evt_gatt_characteristic_value_id");
+            log_trace("gecko_evt_gatt_characteristic_value_id");
             break;
         case gecko_evt_le_connection_opened_id:
-            printf("gecko_evt_le_connection_opened_id");
+            log_trace("gecko_evt_le_connection_opened_id");
             break;
         case gecko_evt_gatt_server_user_write_request_id:
-            printf("gecko_evt_gatt_server_user_write_request_id");
+            log_trace("gecko_evt_gatt_server_user_write_request_id");
             break;
         case gecko_evt_le_connection_parameters_id:
-            printf("gecko_evt_le_connection_parameters_id");
+            log_trace("gecko_evt_le_connection_parameters_id");
             break;
         case gecko_evt_le_connection_phy_status_id:
-            printf("gecko_evt_le_connection_phy_status_id");
+            log_trace("gecko_evt_le_connection_phy_status_id");
             break;
         case gecko_evt_le_connection_closed_id:
-            printf("gecko_evt_le_connection_closed_id");
+            log_trace("gecko_evt_le_connection_closed_id");
             break;
         default:
-            printf("UNKNOWN");
+            log_trace("UNKNOWN");
             break;
     }
-
-    printf("\n\n");
 }
 
 static void print_advertisement(struct gecko_msg_le_gap_scan_response_evt_t *response, char *name) {
-    printf("\nAdvertisement:\n");
-    printf("  Name:    %s\n", name);
-    printf("  Address: %02X:%02X:%02X:%02X:%02X:%02X\n\n", response->address.addr[5], response->address.addr[4],
+    log_trace("Advertisement:");
+    log_trace("  Name:    %s", name);
+    log_trace("  Address: %02X:%02X:%02X:%02X:%02X:%02X", response->address.addr[5], response->address.addr[4],
            response->address.addr[3], response->address.addr[2], response->address.addr[1], response->address.addr[0]);
 }
 
-static void print_buffer(uint32_t length, uint8_t *data, bool reversed) {
-    uint32_t byte_index;
-    if (reversed) {
-        for (byte_index = length - 1; byte_index >= 0; byte_index--) {
-            printf("%02X ", data[byte_index]);
+static void bytes_to_hex_string(uint32_t length, uint8_t *data, bool reversed, char *buffer) {
+    uint32_t bytes_remaining = length;
+    char *buffer_ptr = buffer;
+    uint8_t *data_ptr = data;
+
+    while (bytes_remaining) {
+        for (uint8_t nibble_counter = 0; nibble_counter < 2; nibble_counter++) {
+            uint8_t nibble = (((*data_ptr) >> (nibble_counter*4)) & 0x0F);
+            *buffer_ptr++ = nibble + (nibble < 10) ? 48 : 55;
         }
-    } else {
-        for (byte_index = 0; byte_index < length; byte_index++) {
-            printf("%02X ", data[byte_index]);
+        if (reversed) {
+            data_ptr--;
+        } else {
+            data_ptr++;
         }
+        bytes_remaining--;
     }
+    *buffer_ptr = '\0';
 }
 
 static void print_characteristic(struct gecko_msg_gatt_characteristic_evt_t *characteristic, uint32_t service) {
-    printf("\nCharacteristic Info:\n");
-    printf("  Service: 0x%X\n", service);
-    printf("  Characteristic: 0x%X\n", characteristic->characteristic);
-    printf("  Properties: 0x%X\n", characteristic->properties);
-    printf("  UUID: ");
-    print_buffer(characteristic->uuid.len, characteristic->uuid.data, FALSE);
-    printf("\n\n");
+    log_trace("Characteristic Info:");
+    log_trace("  Service: 0x%X", service);
+    log_trace("  Characteristic: 0x%X", characteristic->characteristic);
+    log_trace("  Properties: 0x%X", characteristic->properties);
+    char uuid_buffer[256];
+    bytes_to_hex_string(characteristic->uuid.len, characteristic->uuid.data, FALSE, uuid_buffer);
+    log_trace("  UUID: %s", uuid_buffer);   
 }
 
 static Characteristic *get_characteristic_by_handle(uint16_t handle) {
@@ -247,13 +255,11 @@ static bool handle_advertisement(struct gecko_cmd_packet *event) {
 
 static void handle_state_transition(AppState new_state) {
     if (new_state >= NUM_STATES) {
-        printf("ERROR: Unhandled State: %d\n", new_state);
+        log_error("ERROR: Unhandled State: %d", new_state);
         flash_led();
     }
 
-    printf("===================================================\n");
-    printf("State Transition: %s --> %s\n", _state_names[_state], _state_names[new_state]);
-    printf("===================================================\n");
+    log_debug("State Transition: %s --> %s", _state_names[_state], _state_names[new_state]);
 
     _state = new_state;
     _state_handlers[_state](0, NULL, TRUE);
@@ -268,7 +274,7 @@ static void state_handler_init(uint32_t message_id, struct gecko_cmd_packet *eve
 
     switch (message_id) {
         case gecko_evt_system_boot_id:
-            printf("System Booted\n");
+            log_debug("System Booted");
             _system_ready = TRUE;
             handle_state_transition(STATE_DISCOVERY);
             break;
@@ -280,7 +286,16 @@ static void state_handler_init(uint32_t message_id, struct gecko_cmd_packet *eve
 }
 
 static void state_handler_discovery(uint32_t message_id, struct gecko_cmd_packet *event, bool entry) {
+    static time_t discovery_start_time;
+    static uint8_t advertisement_counter = 0;
+    if (advertisement_counter++ % 2) {
+        set_led_color(LED_YELLOW);
+    } else {
+        set_led_color(LED_GREEN);
+    }
+
     if (entry) {
+        discovery_start_time = time(NULL);
         struct gecko_msg_le_gap_set_discovery_type_rsp_t *set_discovery_response;
         struct gecko_msg_le_gap_start_discovery_rsp_t *start_discovery_response;
 
@@ -290,15 +305,21 @@ static void state_handler_discovery(uint32_t message_id, struct gecko_cmd_packet
         if (set_discovery_response->result == 0) {
             start_discovery_response = gecko_cmd_le_gap_start_discovery(le_gap_phy_1m, le_gap_general_discoverable);
             if (start_discovery_response->result != 0) {
-                printf("ERROR: gecko_cmd_le_gap_start_discovery failure - %d\n", start_discovery_response->result);
+                log_error("gecko_cmd_le_gap_start_discovery failure - %d", start_discovery_response->result);
                 flash_led();
             }
         } else {
-            printf("ERROR: gecko_cmd_le_gap_set_discovery_type failure - %d\n", set_discovery_response->result);
+            log_error("gecko_cmd_le_gap_set_discovery_type failure - %d", set_discovery_response->result);
             flash_led();
         }
 
         return;
+    }
+
+    // Wait a maximum of ADVERTISEMENT_TIMEOUT_SECONDS seconds for a matching advertisement packet
+    if ((time(NULL) - discovery_start_time) > ADVERTISEMENT_TIMEOUT_SECONDS) {
+        log_error("Advertisement timeout exceeded.");
+        flash_led();
     }
 
     switch (message_id) {
@@ -308,7 +329,7 @@ static void state_handler_discovery(uint32_t message_id, struct gecko_cmd_packet
                 if (response->result == 0) {
                     handle_state_transition(STATE_CONNECT);
                 } else {
-                    printf("ERROR: gecko_cmd_le_gap_end_procedure failure - %d\n", response->result);
+                    log_error("gecko_cmd_le_gap_end_procedure failure - %d", response->result);
                 }
             }
             break;
@@ -317,9 +338,7 @@ static void state_handler_discovery(uint32_t message_id, struct gecko_cmd_packet
             break;
 
         default:
-            printf("*********************************\n");
-            printf("     WARNING: Unhandled Event    \n");
-            printf("*********************************\n");
+            log_warn("Unhandled Event");
             break;
     }
 
@@ -333,7 +352,7 @@ static void state_handler_connect(uint32_t message_id, struct gecko_cmd_packet *
         if (response->result == 0) {
             _thunderboard.connection = response->connection;
         } else {
-            printf("ERROR: gecko_cmd_le_gap_connect failed - 0x%X\n", response->result);
+            log_fatal("gecko_cmd_le_gap_connect failed - 0x%X", response->result);
             flash_led();
         }
         return;
@@ -350,9 +369,7 @@ static void state_handler_connect(uint32_t message_id, struct gecko_cmd_packet *
             break;
 
         default:
-            printf("*********************************\n");
-            printf("     WARNING: Unhandled Event    \n");
-            printf("*********************************\n");
+            log_warn("Unhandled Event");
             break;
     }
 
@@ -364,7 +381,7 @@ static void state_handler_service_discovery(uint32_t message_id, struct gecko_cm
         struct gecko_msg_gatt_discover_primary_services_rsp_t *response =
             gecko_cmd_gatt_discover_primary_services(_thunderboard.connection);
         if (response->result != 0) {
-            printf("ERROR: gecko_cmd_gatt_discover_primary_services failed - 0x%X\n", response->result);
+            log_fatal("gecko_cmd_gatt_discover_primary_services failed - 0x%X", response->result);
             flash_led();
         }
         return;
@@ -372,9 +389,9 @@ static void state_handler_service_discovery(uint32_t message_id, struct gecko_cm
 
     switch (message_id) {
         case gecko_evt_gatt_service_id:
-            printf("Found Service[%d]: %d\n", _thunderboard.services.length, event->data.evt_gatt_service.service);
+            log_trace("Found Service[%d]: %d", _thunderboard.services.length, event->data.evt_gatt_service.service);
             if (_thunderboard.services.length == MAX_NUM_SERVICES) {
-                printf("ERROR: Max Services Exceeded");
+                log_fatal("Max Services Exceeded");
                 flash_led();
             }
             _thunderboard.services.list[_thunderboard.services.length++] = event->data.evt_gatt_service.service;
@@ -389,9 +406,7 @@ static void state_handler_service_discovery(uint32_t message_id, struct gecko_cm
             break;
 
         default:
-            printf("*********************************\n");
-            printf("     WARNING: Unhandled Event    \n");
-            printf("*********************************\n");
+            log_warn("Unhandled Event");
             break;
     }
 
@@ -405,7 +420,7 @@ static void state_handler_characteristic_discovery(uint32_t message_id, struct g
         struct gecko_msg_gatt_discover_characteristics_rsp_t *response = gecko_cmd_gatt_discover_characteristics(
             _thunderboard.connection, _thunderboard.services.list[service_index]);
         if (response->result != 0) {
-            printf("ERROR: gecko_cmd_gatt_discover_characteristics failed - 0x%X\n", response->result);
+            log_fatal("gecko_cmd_gatt_discover_characteristics failed - 0x%X", response->result);
             flash_led();
         }
 
@@ -430,6 +445,7 @@ static void state_handler_characteristic_discovery(uint32_t message_id, struct g
                     if (new_characteristic->uuid.length == sizeof(temperature_uuid) &&
                         memcmp(temperature_uuid, new_characteristic->uuid.bytes, sizeof(temperature_uuid)) == 0) {
                         _thunderboard.temperature_sensor = new_characteristic;
+                        log_debug("Registered Temperature Characteristic: %d", _thunderboard.temperature_sensor->characteristic);
                         break;
                     }
                 }
@@ -446,6 +462,7 @@ static void state_handler_characteristic_discovery(uint32_t message_id, struct g
                     if (new_characteristic->uuid.length == sizeof(humidity_uuid) &&
                         memcmp(humidity_uuid, new_characteristic->uuid.bytes, sizeof(humidity_uuid)) == 0) {
                         _thunderboard.humidity_sensor = new_characteristic;
+                        log_debug("Registered Humidity Characteristic: %d", _thunderboard.humidity_sensor->characteristic);
                         break;
                     }
                 }
@@ -454,6 +471,7 @@ static void state_handler_characteristic_discovery(uint32_t message_id, struct g
                     if (new_characteristic->uuid.length == sizeof(uv_uuid) &&
                         memcmp(uv_uuid, new_characteristic->uuid.bytes, sizeof(uv_uuid)) == 0) {
                         _thunderboard.uv_sensor = new_characteristic;
+                        log_debug("Registered UV Characteristic: %d", _thunderboard.uv_sensor->characteristic);
                         break;
                     }
                 }
@@ -463,6 +481,7 @@ static void state_handler_characteristic_discovery(uint32_t message_id, struct g
                     if (new_characteristic->uuid.length == sizeof(co2_uuid) &&
                         memcmp(co2_uuid, new_characteristic->uuid.bytes, sizeof(co2_uuid)) == 0) {
                         _thunderboard.co2_sensor = new_characteristic;
+                        log_debug("Registered CO2 Characteristic: %d", _thunderboard.co2_sensor->characteristic);
                         break;
                     }
                 }
@@ -472,6 +491,7 @@ static void state_handler_characteristic_discovery(uint32_t message_id, struct g
                     if (new_characteristic->uuid.length == sizeof(voc_uuid) &&
                         memcmp(voc_uuid, new_characteristic->uuid.bytes, sizeof(voc_uuid)) == 0) {
                         _thunderboard.voc_sensor = new_characteristic;
+                        log_debug("Registered VOC Characteristic: %d", _thunderboard.voc_sensor->characteristic);
                         break;
                     }
                 }
@@ -481,6 +501,7 @@ static void state_handler_characteristic_discovery(uint32_t message_id, struct g
                     if (new_characteristic->uuid.length == sizeof(light_uuid) &&
                         memcmp(light_uuid, new_characteristic->uuid.bytes, sizeof(light_uuid)) == 0) {
                         _thunderboard.light_sensor = new_characteristic;
+                        log_debug("Registered Light Characteristic: %d", _thunderboard.light_sensor->characteristic);
                         break;
                     }
                 }
@@ -490,6 +511,7 @@ static void state_handler_characteristic_discovery(uint32_t message_id, struct g
                     if (new_characteristic->uuid.length == sizeof(sound_uuid) &&
                         memcmp(sound_uuid, new_characteristic->uuid.bytes, sizeof(sound_uuid)) == 0) {
                         _thunderboard.sound_sensor = new_characteristic;
+                        log_debug("Registered Sound Characteristic: %d", _thunderboard.sound_sensor->characteristic);
                         break;
                     }
                 }
@@ -499,6 +521,7 @@ static void state_handler_characteristic_discovery(uint32_t message_id, struct g
                     if (new_characteristic->uuid.length == sizeof(acceleration_uuid) &&
                         memcmp(acceleration_uuid, new_characteristic->uuid.bytes, sizeof(acceleration_uuid)) == 0) {
                         _thunderboard.acceleration_sensor = new_characteristic;
+                        log_debug("Registered Acceleration Characteristic: %d", _thunderboard.acceleration_sensor->characteristic);
                         break;
                     }
                 }
@@ -508,6 +531,7 @@ static void state_handler_characteristic_discovery(uint32_t message_id, struct g
                     if (new_characteristic->uuid.length == sizeof(orientation_uuid) &&
                         memcmp(orientation_uuid, new_characteristic->uuid.bytes, sizeof(orientation_uuid)) == 0) {
                         _thunderboard.orientation_sensor = new_characteristic;
+                        log_debug("Registered Orientation Characteristic: %d", _thunderboard.orientation_sensor->characteristic);
                         break;
                     }
                 }
@@ -521,7 +545,7 @@ static void state_handler_characteristic_discovery(uint32_t message_id, struct g
                     gecko_cmd_gatt_discover_characteristics(_thunderboard.connection,
                                                             _thunderboard.services.list[service_index]);
                 if (response->result != 0) {
-                    printf("ERROR: gecko_cmd_gatt_discover_characteristics failed - 0x%X\n", response->result);
+                    log_fatal("gecko_cmd_gatt_discover_characteristics failed - 0x%X", response->result);
                     flash_led();
                 }
             } else {
@@ -530,9 +554,7 @@ static void state_handler_characteristic_discovery(uint32_t message_id, struct g
         } break;
 
         default:
-            printf("*********************************\n");
-            printf("     WARNING: Unhandled Event    \n");
-            printf("*********************************\n");
+            log_warn("Unhandled Event");
             break;
     }
 
@@ -551,7 +573,7 @@ static void state_handler_subscribe_characteristics(uint32_t message_id, struct 
                     gecko_cmd_gatt_set_characteristic_notification(
                         _thunderboard.connection, _thunderboard.all_sensors[subscribe_sensor_index]->characteristic, 3);
                 if (response->result != 0) {
-                    printf("ERROR: gecko_msg_gatt_server_write_attribute_value_rsp_t failed - %d\n", response->result);
+                    log_fatal("gecko_msg_gatt_server_write_attribute_value_rsp_t failed - %d", response->result);
                     flash_led();
                 }
                 break;
@@ -573,7 +595,7 @@ static void state_handler_subscribe_characteristics(uint32_t message_id, struct 
                             _thunderboard.connection, _thunderboard.all_sensors[subscribe_sensor_index]->characteristic,
                             3);
                     if (response->result != 0) {
-                        printf("ERROR: gecko_msg_gatt_server_write_attribute_value_rsp_t failed - %d\n",
+                        log_fatal("gecko_msg_gatt_server_write_attribute_value_rsp_t failed - %d",
                                response->result);
                         flash_led();
                     }
@@ -586,9 +608,7 @@ static void state_handler_subscribe_characteristics(uint32_t message_id, struct 
         } break;
 
         default:
-            printf("*********************************\n");
-            printf("     WARNING: Unhandled Event    \n");
-            printf("*********************************\n");
+            log_warn("Unhandled Event");
             break;
     }
 }
@@ -599,7 +619,7 @@ static void state_handler_read_characteristics(uint32_t message_id, struct gecko
     if (entry) {
         uint32_t i;
         for (i = 0; i < NUM_THUNDERBOARD_SENSORS; i++) {
-            printf("all_sensors[%u]: %p\n", i, _thunderboard.all_sensors[i]);
+            log_trace("all_sensors[%u]: %p", i, _thunderboard.all_sensors[i]);
         }
 
         for (sensor_index = 0; sensor_index < NUM_THUNDERBOARD_SENSORS; sensor_index++) {
@@ -608,12 +628,12 @@ static void state_handler_read_characteristics(uint32_t message_id, struct gecko
                     gecko_cmd_gatt_read_characteristic_value(_thunderboard.connection,
                                                              _thunderboard.all_sensors[sensor_index]->characteristic);
                 if (response->result != 0) {
-                    printf("ERROR: gecko_cmd_gatt_read_characteristic_value failed - 0x%X\n", response->result);
+                    log_fatal("gecko_cmd_gatt_read_characteristic_value failed - 0x%X", response->result);
                     flash_led();
                 }
                 break;
             } else {
-                printf("WARNING: NULL Sensor at index %d\n", sensor_index);
+                log_warn("NULL Sensor at index %d", sensor_index);
             }
         }
         return;
@@ -621,11 +641,11 @@ static void state_handler_read_characteristics(uint32_t message_id, struct gecko
 
     switch (message_id) {
         case gecko_evt_gatt_characteristic_value_id: {
-            printf("Got Characteristic value\n");
+            log_trace("Got Characteristic value");
             Characteristic *current_characteristic =
                 get_characteristic_by_handle(event->data.evt_gatt_characteristic_value.characteristic);
             if (current_characteristic == NULL) {
-                printf("ERROR: get_characteristic_by_handle returned NULL\n");
+                log_error("get_characteristic_by_handle for %d returned NULL", event->data.evt_gatt_characteristic_value.characteristic);
             } else {
                 memcpy(current_characteristic->value, event->data.evt_gatt_characteristic_value.value.data,
                        event->data.evt_gatt_characteristic_value.value.len);
@@ -640,13 +660,13 @@ static void state_handler_read_characteristics(uint32_t message_id, struct gecko
         case gecko_evt_gatt_procedure_completed_id:
             for (; sensor_index < NUM_THUNDERBOARD_SENSORS; sensor_index++) {
                 if (_thunderboard.all_sensors[sensor_index] == NULL) {
-                    printf("WARNING: NULL Sensor at index %d\n", sensor_index);
+                    log_warn("WARNING: NULL Sensor at index %d", sensor_index);
                 } else if (_thunderboard.all_sensors[sensor_index]->properties.read) {
                     struct gecko_msg_gatt_read_characteristic_value_rsp_t *response =
                         gecko_cmd_gatt_read_characteristic_value(
                             _thunderboard.connection, _thunderboard.all_sensors[sensor_index]->characteristic);
                     if (response->result != 0) {
-                        printf("ERROR: gecko_cmd_gatt_read_characteristic_value failed - 0x%X\n", response->result);
+                        log_fatal("gecko_cmd_gatt_read_characteristic_value failed - 0x%X", response->result);
                         flash_led();
                     }
                     break;
@@ -660,7 +680,7 @@ static void state_handler_read_characteristics(uint32_t message_id, struct gecko
                     gecko_cmd_gatt_read_characteristic_value(_thunderboard.connection,
                                                              _thunderboard.all_sensors[sensor_index]->characteristic);
                 if (response->result != 0) {
-                    printf("ERROR: gecko_cmd_gatt_read_characteristic_value failed - 0x%X\n", response->result);
+                    log_fatal("gecko_cmd_gatt_read_characteristic_value failed - 0x%X", response->result);
                     flash_led();
                 }
             }

@@ -5,6 +5,8 @@
 #include <azureiot/parson.h>
 
 #include "azure_functions.h"
+#include "main.h"
+#include "log.h"
 
 static unsigned long long get_utc_ms_timestamp();
 static int extract_json_string(JSON_Object* json_object, const char* field_name, char *destination);
@@ -19,6 +21,7 @@ static int fetch_host_name();
 static char _curl_buffer[CURL_BUFFER_SIZE] = {0};
 static JSON_Value *_json_response = NULL;
 static uint32_t _buffer_offset = 0;
+static const char* const JSON_NODE_ERROR_CODE = "errorCode";
 static const char* const JSON_NODE_OPERATION_ID = "operationId";
 static const char* const JSON_NODE_ASSIGNED_HUB = "assignedHub";
 static const char* const JSON_NODE_REG_STATUS = "registrationState";
@@ -28,6 +31,66 @@ static AzureConfig _azure_config = {0};
 #define DATA_BUFFER_SIZE 512
 static char _url_buffer[DATA_BUFFER_SIZE];
 static char _request_data_buffer[DATA_BUFFER_SIZE];
+
+int wait_for_network_connection(int attempts) {
+    CURL *curl = NULL;
+    CURLcode res = CURLE_OK;
+    int network_up = 0;
+    int quit = 0;
+
+    log_trace("Checking for internet connection...\n");
+
+    curl = curl_easy_init();
+    if (curl) {
+        res = curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
+        if (res) {
+            log_error("Failed to set curl write func. (%d) %s", res, curl_easy_strerror(res));
+            return 1;
+        }
+
+        res = curl_easy_setopt(curl, CURLOPT_URL, "www.google.com");
+        if (res) {
+            log_error("curl_easy_setopt CURLOPT_URL failed. (%d) %s", res, curl_easy_strerror(res));
+            return 1;
+        }
+        for (int attempt_counter = 0; attempt_counter < attempts && !quit; attempt_counter++) {
+            res = curl_easy_perform(curl);
+            switch (res) {
+                case CURLE_COULDNT_CONNECT:
+                case CURLE_COULDNT_RESOLVE_HOST:
+                case CURLE_COULDNT_RESOLVE_PROXY:
+                    log_warn("No internet connection. Retrying [%d/%d]...", attempt_counter, attempts);
+                    if (attempt_counter % 2) {
+                        set_led_color(LED_YELLOW);
+                    } else {
+                        set_led_color(LED_GREEN);
+                    }
+                    sleep(10);
+                    break;
+                case CURLE_OK:
+                    network_up = 1;
+                    quit = 1;
+                break;
+                default:
+                    log_error("ERROR: Unknown CURL error: %d -- %s", res, curl_easy_strerror(res));
+                    quit = 1;
+                break;
+            }
+        }
+
+        if (network_up) {
+            log_trace("Interent connection established.");
+        } else {
+            log_trace("No internet connection.");
+        }
+    } else {
+        log_error("curl_easy_init failed. (%d) %s", res, curl_easy_strerror(res));
+    }
+
+    curl_easy_cleanup(curl);
+
+    return !network_up;
+}
 
 int azure_init() {
     if (init_azure_config() != 0) {
@@ -58,7 +121,7 @@ static int init_azure_config() {
     JSON_Value *root_value = json_parse_file(CONFIG_FILE_NAME);
 
     if (root_value == NULL) {
-        printf("ERROR: Could not read azure config file.\n");
+        log_error("Could not read azure config file.\n");
         return -1;
     }
 
@@ -85,12 +148,19 @@ static int fetch_operation_id() {
     snprintf(_request_data_buffer, DATA_BUFFER_SIZE, "{\"registrationId\":\"%s\"}", _azure_config.device_id);
 
     if (make_request("PUT", _url_buffer, _request_data_buffer, _azure_config.scope_id, true)) {
-        printf("ERROR: make_request failed.\n");
+        log_error("make_request failed.");
         return -1;
     }
 
-    extract_json_string(json_value_get_object(_json_response), JSON_NODE_OPERATION_ID, _azure_config.operation_id);
-    printf("\n\nOPERATION ID: %s\n\n", _azure_config.operation_id);
+    char error_code[32];
+    if (!extract_json_string(json_value_get_object(_json_response), JSON_NODE_ERROR_CODE, error_code)) {
+        log_fatal("Azure error: %s", error_code);
+        return -1;
+    } else if (extract_json_string(json_value_get_object(_json_response), JSON_NODE_OPERATION_ID, _azure_config.operation_id)) {
+        log_fatal("No Operation ID");
+    } else {
+        log_info("OPERATION ID: %s", _azure_config.operation_id);
+    }
 
     return 0;
 }
@@ -102,7 +172,7 @@ static int fetch_host_name() {
     for (retries = 0; retries < 5; retries++) {
         sleep(2);
         if (make_request("GET", _url_buffer, NULL, _azure_config.scope_id, TRUE)) {
-            printf("ERROR: make_request failed.\n");
+            log_error("make_request failed.");
             return -1;
         }
         
@@ -118,17 +188,16 @@ static int fetch_host_name() {
         break;
     }
 
-    printf("\nHOST NAME: %s\n\n", _azure_config.host_name);
+    log_info("HOST NAME: %s", _azure_config.host_name);
 
     return 0;
 }
 
 static void print_azure_config() {
-    printf("\n=======AZURE CONFIG========\n");
-    printf("Device ID: %s\n", _azure_config.device_id);
-    printf("Scope ID: %s\n", _azure_config.scope_id);
-    printf("Primary Key: %s\n", _azure_config.primary_key);
-    printf("===========================\n");
+    log_info("AZURE CONFIG");
+    log_info("Device ID: %s", _azure_config.device_id);
+    log_info("Scope ID: %s", _azure_config.scope_id);
+    log_info("Primary Key: %s", _azure_config.primary_key);
 }
 
 static unsigned long long get_utc_ms_timestamp() {
@@ -149,7 +218,7 @@ static int extract_json_string(JSON_Object* json_object, const char* field_name,
         const char* json_item = json_value_get_string(json_field);
         strcpy(destination, json_item);
     } else {
-        printf("ERROR: failure retrieving json object value %s", field_name);
+        log_error("failure retrieving json object value %s", field_name);
         return -1;
     }
 
@@ -158,7 +227,7 @@ static int extract_json_string(JSON_Object* json_object, const char* field_name,
 
 size_t write_callback(char *ptr, size_t size, size_t nmemb, void *userdata) {
     if (_buffer_offset + nmemb > CURL_BUFFER_SIZE) {
-        printf("Too much data\n");
+        log_error("Too much data");
         return -1;
     }
 
@@ -178,7 +247,7 @@ static int get_auth_string(char *auth_buffer, char *scope, char *target, char *k
 
     sprintf(auth_buffer, "%s", STRING_c_str(sas_token));
 
-    printf("AUTH: %s\n\n",auth_buffer);
+    log_trace("AUTH: %s",auth_buffer);
 
     return 0;
 }
@@ -201,47 +270,51 @@ int make_request(char *method, char *url, char *data, char *scope, bool dps) {
     curl = curl_easy_init();
     if (!curl) {
         res = CURLE_FAILED_INIT;
-        printf("ERROR: Curl Init Failed\n");
+        log_error("Curl Init Failed. (%d) %s", res, curl_easy_strerror(res));
         return -1;
     }
     
-    //char *ca_path = "/etc/cacert.pem";
-    res = curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0);
     res = curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0);
     if (res) {
-      printf("ERROR: Failed to set curl write func\n");
-      return -1;
+        log_error("curl_easy_setopt CURLOPT_SSL_VERIFYPEER Failed. (%d) %s", res, curl_easy_strerror(res));
+        return -1;
+    }
+
+    res = curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0);
+    if (res) {
+        log_error("curl_easy_setopt CURLOPT_SSL_VERIFYHOST Failed. (%d) %s", res, curl_easy_strerror(res));
+        return -1;
     }
 
     res = curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
     if (res) {
-      printf("ERROR: Failed to set curl write func\n");
+      log_error("curl_easy_setopt CURLOPT_WRITEFUNCTION Failed. (%d) %s", res, curl_easy_strerror(res));
       return -1;
     }
 
     res = curl_easy_setopt(curl, CURLOPT_URL, url);
     if (res) {
-        printf("curl_easy_setopt failed\n");
+        log_error("curl_easy_setopt CURLOPT_URL Failed. (%d) %s", res, curl_easy_strerror(res));
         return -1;
     }
 
     res = curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, method);
     if (res) {
-        printf("curl_easy_setopt failed\n");
+        log_error("curl_easy_setopt CURLOPT_CUSTOMREQUEST Failed. (%d) %s", res, curl_easy_strerror(res));
         return -1;
     }
 
     if (data) {
         res = curl_easy_setopt(curl, CURLOPT_POSTFIELDS, data);
         if (res) {
-            printf("curl_easy_setopt CURLOPT_POSTFIELDS failed\n");
+            log_error("curl_easy_setopt CURLOPT_POSTFIELDS Failed. (%d) %s", res, curl_easy_strerror(res));
             return -1;
         }
     }
 
     char auth_string[256];
     if (get_auth_string(auth_string, scope, reason, target) != 0) {
-        printf("ERROR: auth failed.\n");
+        log_error("Auth failed.");
         return -1;
     }
     char auth_header[512];
@@ -262,7 +335,7 @@ int make_request(char *method, char *url, char *data, char *scope, bool dps) {
 
     res = curl_easy_setopt(curl, CURLOPT_HTTPHEADER, chunk);
     if (res) {
-        printf("curl_easy_setopt failed\n");
+        log_error("curl_easy_setopt CURLOPT_HTTPHEADER Failed. (%d) %s", res, curl_easy_strerror(res));
         return -1;
     }
 
@@ -272,13 +345,11 @@ int make_request(char *method, char *url, char *data, char *scope, bool dps) {
 
     res = curl_easy_perform(curl);
     if (res) {
-        printf("curl_easy_perform failed: %d\n", res);
+        log_error("curl_easy_perform Failed. (%d) %s", res, curl_easy_strerror(res));
         return -1;
     }
 
-#if VERBOSE_CURL
-    printf("\n\nRESPONSE:\n%s\n\n", _curl_buffer);
-#endif
+    log_trace("\nRESPONSE:\n%s", _curl_buffer);
 
     _json_response = json_parse_string(_curl_buffer);
 

@@ -16,7 +16,9 @@
 #include "log.h"
 
 //TODO Before Release - Set advertisement timeout time much higher
-
+// orientation 0-180
+// sound
+// air pressure
 extern SensorValues _sensor_values;
 
 static FILE *_log_file = NULL;

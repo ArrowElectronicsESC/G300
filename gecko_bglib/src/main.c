@@ -23,18 +23,21 @@ extern SensorValues _sensor_values;
 
 static FILE *_log_file = NULL;
 
-static void get_parameters(int argc, char **argv, uint32_t *baudrate, char **serial_port);
+static int get_parameters(int argc, char **argv, G300Args *args);
 static void upload_sensor_values();
 
 BGLIB_DEFINE();
 
 int main(int argc, char **argv) {
     uint32_t last_reading_id = 0;
-    uint32_t baudrate;
-    char *serial_port;
-    struct gecko_cmd_packet *event;
+    G300Args arguments = {0};
+    struct gecko_cmd_packet *event = NULL;
 
     CURLcode res;
+
+    if (get_parameters(argc, argv, &arguments)) {
+        exit(-1);
+    }
 
     set_led_color(LED_RED);
     usleep(300000);
@@ -49,7 +52,7 @@ int main(int argc, char **argv) {
     _log_file = fopen("/data/g300.log", "w");
     if (_log_file) {
         log_set_fp(_log_file);
-        log_set_level(LOG_DEBUG);
+        log_set_level(arguments.log_level);
     }
 
     res = curl_global_init(CURL_GLOBAL_ALL);
@@ -63,17 +66,21 @@ int main(int argc, char **argv) {
         flash_led();
     }
 
-    if (azure_init() != 0) {
-        log_fatal("Azure Init Failed.\n");
+    if (azure_init()) {
+        log_fatal("Azure Init Failed.");
         flash_led();
+    } else {
+        log_trace("Azure Initialized.");
     }
 
     BGLIB_INITIALIZE_NONBLOCK(serial_write, uartRx, uartRxPeek);
 
-    get_parameters(argc, argv, &baudrate, &serial_port);
-    if (uartOpen((int8_t *)serial_port, baudrate, 0, 100) < 0) {
+    if (uartOpen((int8_t *)arguments.serial_port, arguments.baudrate, 0, 100)
+        < 0) {
         log_fatal("Serial Port Initialization Failed");
         flash_led();
+    } else {
+        log_trace("Serial Port Initialized.");
     }
 
     set_led_color(LED_YELLOW);
@@ -137,22 +144,75 @@ void flash_led() {
     exit(-1);
 }
 
-static void get_parameters(int argc, char **argv, uint32_t *baudrate, char **serial_port) {
+static int get_parameters(int argc, char **argv, G300Args *args) {
+    args->baudrate = 115200;
+    snprintf(args->serial_port, sizeof(args->serial_port), "/dev/ttyS1");
+    args->log_level = LOG_DEBUG;
+
     if (argc == 1) {
-        *baudrate = 115200;
-        *serial_port = "/dev/ttyS1";
-        log_info("Using Default Parameters:");
-    } else if (argc == 3) {
-        *baudrate = atoi(argv[2]);
-        *serial_port = argv[1];
-    } else {
-        printf(USAGE, argv[0]);
-        flash_led();
+        return 0;
     }
 
-    log_info("Baud Rate: %d\nSerial Port: %s", *baudrate, *serial_port);
+    bool expect_baud = FALSE;
+    bool got_baud = FALSE;
+    bool expect_serial = FALSE;
+    bool got_serial = FALSE;
+    bool expect_log = FALSE;
+    bool got_log = FALSE;
 
-    return;
+    for (uint32_t arg_index = 1; arg_index < argc; arg_index++) {
+        if (expect_baud) {
+            args->baudrate = atoi(argv[arg_index]);
+            expect_baud = FALSE;
+            got_baud = TRUE;
+        } else if (expect_serial) {
+            snprintf(args->serial_port, sizeof(args->serial_port), "%s",
+                argv[arg_index]);
+            expect_serial = FALSE;
+            got_serial = TRUE;
+        } else if (expect_log) {
+            args->log_level = atoi(argv[arg_index]);
+            expect_log = FALSE;
+            got_log = TRUE;
+        } else {
+            if (strcmp(argv[arg_index], "-b") == 0) {
+                if (got_baud) {
+                    printf(USAGE, argv[0]);
+                    return -1;
+                } else {
+                    expect_baud = TRUE;
+                }
+            } else if (strcmp(argv[arg_index], "-s") == 0) {
+                if (got_serial) {
+                    printf(USAGE, argv[0]);
+                    return -1;
+                } else {
+                    expect_serial = TRUE;
+                }
+            } else if (strcmp(argv[arg_index], "-l") == 0) {
+                if (got_log) {
+                    printf(USAGE, argv[0]);
+                    return -1;
+                } else {
+                    expect_log = TRUE;
+                }
+            } else {
+                printf(USAGE, argv[0]);
+                return -1;
+            }
+        }
+    }
+
+    if (expect_baud || expect_serial || expect_log) {
+        printf(USAGE, argv[0]);
+        return -1;
+    }
+
+    log_info("Baud Rate: %d", args->baudrate);
+    log_info("Serial Port: %s", args->serial_port);
+    log_info("Log Level: %d", args->log_level);
+
+    return 0;
 }
 
 void serial_write(uint32_t length, uint8_t *data) {

@@ -9,7 +9,7 @@
 #include "log.h"
 
 static unsigned long long get_utc_ms_timestamp();
-static int extract_json_string(JSON_Object* json_object, const char* field_name, char *destination);
+static int extract_json_string(JSON_Object* json_object, const char* field_name, char *destination, int size);
 size_t write_callback(char *ptr, size_t size, size_t nmemb, void *userdata);
 static int get_auth_string(char *auth_buffer, char *scope, char *target, char *key_name);
 static int fetch_operation_id();
@@ -31,6 +31,9 @@ static AzureConfig _azure_config = {0};
 #define DATA_BUFFER_SIZE 512
 static char _url_buffer[DATA_BUFFER_SIZE];
 static char _request_data_buffer[DATA_BUFFER_SIZE];
+
+static char _telemetry_post_url[DATA_BUFFER_SIZE];
+
 
 int wait_for_network_connection(int attempts) {
     CURL *curl = NULL;
@@ -107,14 +110,22 @@ int azure_init() {
         return -1;
     }
 
+    // Create telemetry post url
+    int result = snprintf(_telemetry_post_url, DATA_BUFFER_SIZE,
+        AZURE_URL_TELEMETRY, _azure_config.host_name, _azure_config.device_id);
+    if (result == -1 || result > DATA_BUFFER_SIZE) {
+        log_error("Error creating telemetry post URL");
+        return -1;
+    }
+
     return 0;
 }
 
 int azure_post_telemetry(char *json_string) {
-    snprintf(_url_buffer, DATA_BUFFER_SIZE, "https://%s/devices/%s/messages/events/?api-version=2016-11-14", _azure_config.host_name, _azure_config.device_id);
-    make_request("POST", _url_buffer, json_string, _azure_config.host_name, FALSE);
+    int request_status = make_request("POST", _telemetry_post_url, json_string,
+        _azure_config.host_name, FALSE);
     
-    return (_json_response == NULL) ? 0 : -1;
+    return request_status || (_json_response == NULL) ? 0 : -1;
 }
 
 static int init_azure_config() {
@@ -126,16 +137,48 @@ static int init_azure_config() {
     }
 
     JSON_Object *root_object = json_value_get_object(root_value);
+    if (root_object == NULL) {
+        log_error("Could not create json object.");
+        return -1;
+    }
+
     JSON_Value *field = json_object_get_value(root_object, "DEVICE_ID");
+    if (field == NULL) {
+        log_error("Could not read DEVICE_ID");
+        return -1;
+    }
+
     const char* json_item = json_value_get_string(field);
+    if (json_item == NULL) {
+        log_error("Could not create string from DEVICE_ID");
+        return -1;
+    }
     strcpy(_azure_config.device_id, json_item);
 
     field = json_object_get_value(root_object, "SCOPE_ID");
+    if (field == NULL) {
+        log_error("Could not read SCOPE_ID");
+        return -1;
+    }
+
     json_item = json_value_get_string(field);
+    if (json_item == NULL) {
+        log_error("Could not create string from SCOPE_ID");
+        return -1;
+    }
     strcpy(_azure_config.scope_id, json_item);
 
     field = json_object_get_value(root_object, "PRIMARY_KEY");
+    if (field == NULL) {
+        log_error("Could not read PRIMARY_KEY");
+        return -1;
+    }
+    
     json_item = json_value_get_string(field);
+    if (json_item == NULL) {
+        log_error("Could not create string from PRIMARY_KEY");
+        return -1;
+    }
     strcpy(_azure_config.primary_key, json_item);
 
     json_value_free(root_value);
@@ -144,48 +187,82 @@ static int init_azure_config() {
 }
 
 static int fetch_operation_id() {
-    snprintf(_url_buffer, DATA_BUFFER_SIZE, "https://global.azure-devices-provisioning.net/%s/registrations/%s/register?api-version=2018-11-01", _azure_config.scope_id, _azure_config.device_id);
-    snprintf(_request_data_buffer, DATA_BUFFER_SIZE, "{\"registrationId\":\"%s\"}", _azure_config.device_id);
+    snprintf(_url_buffer, DATA_BUFFER_SIZE, AZURE_URL_OPERATION_ID,
+        _azure_config.scope_id, _azure_config.device_id);
+    snprintf(_request_data_buffer, DATA_BUFFER_SIZE,
+        "{\"registrationId\":\"%s\"}", _azure_config.device_id);
 
-    if (make_request("PUT", _url_buffer, _request_data_buffer, _azure_config.scope_id, true)) {
+    if (make_request("PUT", _url_buffer, _request_data_buffer,
+        _azure_config.scope_id, true)) {
         log_error("make_request failed.");
         return -1;
     }
 
-    char error_code[32];
-    if (!extract_json_string(json_value_get_object(_json_response), JSON_NODE_ERROR_CODE, error_code)) {
-        log_fatal("Azure error: %s", error_code);
-        return -1;
-    } else if (extract_json_string(json_value_get_object(_json_response), JSON_NODE_OPERATION_ID, _azure_config.operation_id)) {
-        log_fatal("No Operation ID");
+    if (_json_response) {
+        JSON_Object *response_object = json_value_get_object(_json_response);
+
+        if (response_object) {
+            char error_code[64];
+            if (extract_json_string(response_object, JSON_NODE_ERROR_CODE,
+                error_code, sizeof(error_code)) == 0) {
+                log_fatal("Azure error: %s", error_code);
+                return -1;
+            }
+
+            if (extract_json_string(response_object, JSON_NODE_OPERATION_ID,
+                _azure_config.operation_id,
+                sizeof(_azure_config.operation_id))) {
+                log_fatal("No Operation ID");
+                return -1;
+            }
+
+            log_info("OPERATION ID: %s", _azure_config.operation_id);
+        } else {
+            log_fatal("Could not create valid json response object.");
+            return -1;
+        }
     } else {
-        log_info("OPERATION ID: %s", _azure_config.operation_id);
+        log_fatal("could not create json_response object");
     }
 
     return 0;
 }
 
 static int fetch_host_name() {
-    snprintf(_url_buffer, DATA_BUFFER_SIZE, "https://global.azure-devices-provisioning.net/%s/registrations/%s/operations/%s?api-version=2018-11-01", _azure_config.scope_id, _azure_config.device_id, _azure_config.operation_id);
+    snprintf(_url_buffer, DATA_BUFFER_SIZE, AZURE_URL_HOST_NAME,
+        _azure_config.scope_id, _azure_config.device_id,
+        _azure_config.operation_id);
     
-    uint8_t retries = 0;
-    for (retries = 0; retries < 5; retries++) {
+    uint8_t retries;
+    for (retries = 0; retries < HOST_NAME_RETRIES; retries++) {
         sleep(2);
-        if (make_request("GET", _url_buffer, NULL, _azure_config.scope_id, TRUE)) {
+        if (make_request("GET", _url_buffer, NULL, _azure_config.scope_id,
+            TRUE)) {
             log_error("make_request failed.");
             return -1;
         }
         
-        JSON_Object *reg_status_object = json_object_get_object(json_value_get_object(_json_response), JSON_NODE_REG_STATUS);
+        JSON_Object *response_object = json_value_get_object(_json_response);
+        if (response_object == NULL) {
+            continue;
+        }
+
+        JSON_Object *reg_status_object = json_object_get_object(response_object,
+            JSON_NODE_REG_STATUS);
         if (!reg_status_object) {
             continue;
         }
 
-        if (extract_json_string(reg_status_object, JSON_NODE_ASSIGNED_HUB, _azure_config.host_name)) {
+        if (extract_json_string(reg_status_object, JSON_NODE_ASSIGNED_HUB,
+            _azure_config.host_name, sizeof(_azure_config.host_name))) {
             continue;
         }
 
         break;
+    }
+
+    if (retries == HOST_NAME_RETRIES) {
+        return -1;
     }
 
     log_info("HOST NAME: %s", _azure_config.host_name);
@@ -210,15 +287,25 @@ static unsigned long long get_utc_ms_timestamp() {
     return utcTimeInMilliseconds;
 }
 
-static int extract_json_string(JSON_Object* json_object, const char* field_name, char *destination) {
+static int extract_json_string(JSON_Object* json_object, const char* field_name,
+    char *destination, int size) {
     JSON_Value* json_field;
     json_field = json_object_get_value(json_object, field_name);
     
     if (json_field) {
         const char* json_item = json_value_get_string(json_field);
-        strcpy(destination, json_item);
+        if (json_item == NULL) {
+            log_error("Could not create string from %s field", json_field);
+            return -1;
+        }
+
+        int result = snprintf(destination, size, "%s", json_item);
+        if (result == -1 || result > size) {
+            log_error("String too long for destination buffer");
+            return -1;
+        }
     } else {
-        log_error("failure retrieving json object value %s", field_name);
+        log_warn("failure retrieving json object value %s", field_name);
         return -1;
     }
 
@@ -237,13 +324,17 @@ size_t write_callback(char *ptr, size_t size, size_t nmemb, void *userdata) {
     return nmemb;
 }
 
-static int get_auth_string(char *auth_buffer, char *scope, char *target, char *key_name) {
-    unsigned long long expiration_timestamp = ((get_utc_ms_timestamp() + (7200 * 1000)) / 1000);
+static int get_auth_string(char *auth_buffer, char *scope, char *target,
+    char *key_name) {
+    unsigned long long expiration_timestamp =
+        ((get_utc_ms_timestamp() + (7200 * 1000)) / 1000);
     char scope_string[128];
-    snprintf(scope_string, 128, "%s%%2f%s%%2f%s", scope, target, _azure_config.device_id);
+    snprintf(scope_string, 128, "%s%%2f%s%%2f%s", scope, target,
+        _azure_config.device_id);
 
     STRING_HANDLE sas_token;
-    sas_token = SASToken_CreateString(_azure_config.primary_key, scope_string, key_name, expiration_timestamp);
+    sas_token = SASToken_CreateString(_azure_config.primary_key, scope_string,
+        key_name, expiration_timestamp);
 
     sprintf(auth_buffer, "%s", STRING_c_str(sas_token));
 
@@ -276,38 +367,44 @@ int make_request(char *method, char *url, char *data, char *scope, bool dps) {
     
     res = curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0);
     if (res) {
-        log_error("curl_easy_setopt CURLOPT_SSL_VERIFYPEER Failed. (%d) %s", res, curl_easy_strerror(res));
+        log_error("curl_easy_setopt CURLOPT_SSL_VERIFYPEER Failed. (%d) %s",
+            res, curl_easy_strerror(res));
         return -1;
     }
 
     res = curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0);
     if (res) {
-        log_error("curl_easy_setopt CURLOPT_SSL_VERIFYHOST Failed. (%d) %s", res, curl_easy_strerror(res));
+        log_error("curl_easy_setopt CURLOPT_SSL_VERIFYHOST Failed. (%d) %s",
+            res, curl_easy_strerror(res));
         return -1;
     }
 
     res = curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
     if (res) {
-      log_error("curl_easy_setopt CURLOPT_WRITEFUNCTION Failed. (%d) %s", res, curl_easy_strerror(res));
+      log_error("curl_easy_setopt CURLOPT_WRITEFUNCTION Failed. (%d) %s", res,
+        curl_easy_strerror(res));
       return -1;
     }
 
     res = curl_easy_setopt(curl, CURLOPT_URL, url);
     if (res) {
-        log_error("curl_easy_setopt CURLOPT_URL Failed. (%d) %s", res, curl_easy_strerror(res));
+        log_error("curl_easy_setopt CURLOPT_URL Failed. (%d) %s", res,
+            curl_easy_strerror(res));
         return -1;
     }
 
     res = curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, method);
     if (res) {
-        log_error("curl_easy_setopt CURLOPT_CUSTOMREQUEST Failed. (%d) %s", res, curl_easy_strerror(res));
+        log_error("curl_easy_setopt CURLOPT_CUSTOMREQUEST Failed. (%d) %s", res,
+            curl_easy_strerror(res));
         return -1;
     }
 
     if (data) {
         res = curl_easy_setopt(curl, CURLOPT_POSTFIELDS, data);
         if (res) {
-            log_error("curl_easy_setopt CURLOPT_POSTFIELDS Failed. (%d) %s", res, curl_easy_strerror(res));
+            log_error("curl_easy_setopt CURLOPT_POSTFIELDS Failed. (%d) %s",
+                res, curl_easy_strerror(res));
             return -1;
         }
     }
@@ -323,19 +420,22 @@ int make_request(char *method, char *url, char *data, char *scope, bool dps) {
     struct curl_slist *chunk = NULL;
     chunk = curl_slist_append(chunk, "accept: application/json");
     char content_length_header[64];
-    snprintf(content_length_header, 64, "Content-Length: %d", data ? strlen(data) :0);
+    snprintf(content_length_header, 64, "Content-Length: %d",
+        data ? strlen(data) : 0);
     chunk = curl_slist_append(chunk, content_length_header);
     chunk = curl_slist_append(chunk, auth_header);
     chunk = curl_slist_append(chunk, "Content-Type: application/json");
 
     if (!dps) {
-        snprintf(other_header_buff, 256, "iothub-to: /devices/%s/messages/events", _azure_config.device_id);
+        snprintf(other_header_buff, 256,
+            "iothub-to: /devices/%s/messages/events", _azure_config.device_id);
         chunk = curl_slist_append(chunk, other_header_buff);
     }
 
     res = curl_easy_setopt(curl, CURLOPT_HTTPHEADER, chunk);
     if (res) {
-        log_error("curl_easy_setopt CURLOPT_HTTPHEADER Failed. (%d) %s", res, curl_easy_strerror(res));
+        log_error("curl_easy_setopt CURLOPT_HTTPHEADER Failed. (%d) %s", res,
+            curl_easy_strerror(res));
         return -1;
     }
 
@@ -345,7 +445,8 @@ int make_request(char *method, char *url, char *data, char *scope, bool dps) {
 
     res = curl_easy_perform(curl);
     if (res) {
-        log_error("curl_easy_perform Failed. (%d) %s", res, curl_easy_strerror(res));
+        log_error("curl_easy_perform Failed. (%d) %s", res,
+            curl_easy_strerror(res));
         return -1;
     }
 

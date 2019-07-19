@@ -4,10 +4,12 @@
 #define VERBOSE_CURL     0
 #define CONFIG_FILE_NAME "/data/azure_config.json"
 #define CURL_BUFFER_SIZE (1024*512)
-
-
+#define AZURE_URL_TELEMETRY "https://%s/devices/%s/messages/events/?api-version=2016-11-14"
+#define AZURE_URL_OPERATION_ID "https://global.azure-devices-provisioning.net/%s/registrations/%s/register?api-version=2018-11-01"
+#define AZURE_URL_HOST_NAME "https://global.azure-devices-provisioning.net/%s/registrations/%s/operations/%s?api-version=2018-11-01"
 #define TRACE() {printf("\nLINE: %d -- FUNCTION: %s\n", __LINE__, __FUNCTION__);}
 
+#define HOST_NAME_RETRIES 5
 
 #define TRUE 1
 #define FALSE 0

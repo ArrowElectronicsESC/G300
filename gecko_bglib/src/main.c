@@ -7,6 +7,8 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <stdlib.h>
+#include <pthread.h>
 
 #include "app.h"
 #include "bg_types.h"
@@ -14,13 +16,14 @@
 #include "uart.h"
 #include "azure_functions.h"
 #include "log.h"
+#include "led_worker.h"
 
 //TODO Before Release - Set advertisement timeout time much higher
 // orientation 0-180
 // sound
 // air pressure
 extern SensorValues _sensor_values;
-
+pthread_t _led_worker_thread;
 static FILE *_log_file = NULL;
 
 static int get_parameters(int argc, char **argv, G300Args *args);
@@ -38,18 +41,22 @@ int main(int argc, char **argv) {
     if (get_parameters(argc, argv, &arguments)) {
         exit(-1);
     }
+    
+    int pthread_result = pthread_create(&_led_worker_thread, NULL, &led_worker, NULL);
+    if (pthread_result) {
+        log_error("Thread creation failed: %d", pthread_result);
 
-    set_led_color(LED_RED);
-    usleep(300000);
-    set_led_color(LED_GREEN);
-    usleep(300000);
-    set_led_color(LED_YELLOW);
-    usleep(300000);
-    set_led_color(LED_GREEN);
-    usleep(300000);
-    set_led_color(LED_YELLOW);
+    }
 
-    _log_file = fopen("/data/g300.log", "w");
+    LedJob program_start_job = {
+        LED_JOB_ALTERNATE,
+        300,
+        {LED_RED, LED_GREEN, LED_YELLOW},
+        3
+    };
+    push_led_job(program_start_job);
+
+    _log_file = fopen(LOG_FILE_PATH, "w");
     if (_log_file) {
         log_set_fp(_log_file);
         log_set_level(arguments.log_level);
@@ -61,6 +68,13 @@ int main(int argc, char **argv) {
       flash_led();
     }
 
+    LedJob flash_yellow_job = {
+        LED_JOB_ON_OFF,
+        400,
+        {LED_YELLOW, 0, 0},
+        1
+    };
+    push_led_job(flash_yellow_job);
     if (wait_for_network_connection(30)) {
         log_fatal("no network available");
         flash_led();
@@ -83,7 +97,13 @@ int main(int argc, char **argv) {
         log_trace("Serial Port Initialized.");
     }
 
-    set_led_color(LED_YELLOW);
+    LedJob bluetooth_scan_job = {
+        LED_JOB_ALTERNATE,
+        500,
+        {LED_YELLOW, LED_GREEN, 0},
+        2
+    };
+    push_led_job(bluetooth_scan_job);
 
     gecko_cmd_system_reset(0);
 
@@ -95,51 +115,60 @@ int main(int argc, char **argv) {
         }
 
         if (_sensor_values.id > last_reading_id) {
-            set_led_color(LED_YELLOW);
-            usleep(700000);
             last_reading_id = _sensor_values.id;
+            LedJob one_sec_yellow_job = {
+                LED_JOB_ALTERNATE,
+                500,
+                {LED_YELLOW, LED_YELLOW, 0},
+                2
+            };
+            push_led_job(one_sec_yellow_job);
             upload_sensor_values();
-            set_led_color(LED_GREEN);
 
-            if ((last_reading_id % 10) == 0) {
+            if (!last_reading_id || (last_reading_id % 10) == 0) {
                 log_info("Azure Upload (%d)", last_reading_id);
             }
+
+            LedJob flash_green_red_job = {
+                LED_JOB_ALTERNATE,
+                500,
+                {LED_GREEN, LED_RED, 0},
+                2
+            };
+            push_led_job(flash_green_red_job);
+
+            sleep(2);
         }
     }
 
     return 0;
 }
 
-void set_led_color(G300LedColor color) {
-    switch (color) {
-        case LED_RED:
-            system("usockc /var/gpio_ctrl WLAN_LED_RED");
-        break;
-        case LED_GREEN:
-            system("usockc /var/gpio_ctrl WLAN_LED_GREEN");
-        break;
-        case LED_YELLOW:
-            system("usockc /var/gpio_ctrl WLAN_LED_YELLOW");
-        break;
-        case LED_OFF:
-            system("usockc /var/gpio_ctrl WLAN_LED_OFF");
-        break;
-    }
-}
-
 void flash_led() {
     log_debug("FLASH LED");
-
-    for(int i = 0; i < 15; i++) {
-        set_led_color(LED_RED);
-        sleep(1);
-        set_led_color(LED_OFF);
-        sleep(1);
-    }
 
     if (_log_file) {
         fclose(_log_file);
     }
+
+    uartClose();
+
+    LedJob flash_red_job = {LED_JOB_ON_OFF, 1000, {LED_RED, 0, 0}, 1};
+    push_led_job(flash_red_job);
+
+    sleep(30);
+
+    LedJob quit_job = {LED_JOB_QUIT, 0, {0, 0, 0}, 0};
+    while (1) {
+        if (!push_led_job(quit_job)) {
+            break;
+        }
+    }
+
+    log_debug("Waiting for LED Worker thread to exit...");
+    void* ret = NULL;
+    pthread_join(_led_worker_thread, &ret);
+    log_debug("LED Worker Thread Closed.");
 
     exit(-1);
 }
@@ -218,7 +247,8 @@ static int get_parameters(int argc, char **argv, G300Args *args) {
 void serial_write(uint32_t length, uint8_t *data) {
     int32_t result = uartTx(length, data);
     if (result < 0) {
-        log_error("ERROR: Failed to write to serial port\n  Error: %d\nErrno: %d", result, errno);
+        log_error("Failed to write to serial port. Error: %d\nErrno: %d",
+            result, errno);
     }
 }
 
@@ -231,10 +261,10 @@ static void upload_sensor_values() {
     log_trace("  VOC: %f", _sensor_values.voc);
     log_trace("  Light: %f", _sensor_values.light);
     log_trace("  Sound: %f", _sensor_values.sound);
-    log_trace("  Acceleration: (%f, %f, %f)", _sensor_values.acceleration[0], _sensor_values.acceleration[1],
-           _sensor_values.acceleration[2]);
-    log_trace("  Orientation: (%f, %f, %f)", _sensor_values.orientation[0], _sensor_values.orientation[1],
-           _sensor_values.orientation[2]);
+    log_trace("  Acceleration: (%f, %f, %f)", _sensor_values.acceleration[0],
+        _sensor_values.acceleration[1], _sensor_values.acceleration[2]);
+    log_trace("  Orientation: (%f, %f, %f)", _sensor_values.orientation[0],
+        _sensor_values.orientation[1], _sensor_values.orientation[2]);
 
     char json_buffer[1024];
     snprintf(json_buffer, 1024, "{\"temp\":%f,"
@@ -250,9 +280,12 @@ static void upload_sensor_values() {
     "\"orientationx\":%f,"
     "\"orientationy\":%f,"
     "\"orientationz\":%f}",
-    _sensor_values.temperature, _sensor_values.pressure, _sensor_values.humidity, _sensor_values.co2, _sensor_values.voc, _sensor_values.light,
-    _sensor_values.sound, _sensor_values.acceleration[0],_sensor_values.acceleration[1],_sensor_values.acceleration[2],
-    _sensor_values.orientation[0],_sensor_values.orientation[1],_sensor_values.orientation[2]);
+    _sensor_values.temperature, _sensor_values.pressure,
+    _sensor_values.humidity, _sensor_values.co2, _sensor_values.voc,
+    _sensor_values.light, _sensor_values.sound, _sensor_values.acceleration[0],
+    _sensor_values.acceleration[1], _sensor_values.acceleration[2],
+    _sensor_values.orientation[0], _sensor_values.orientation[1],
+    _sensor_values.orientation[2]);
 
     azure_post_telemetry(json_buffer);
 }

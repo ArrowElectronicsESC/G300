@@ -41,7 +41,7 @@ int wait_for_network_connection(int attempts) {
     int network_up = 0;
     int quit = 0;
 
-    log_trace("Checking for internet connection...\n");
+    log_trace("Checking for internet connection...");
 
     curl = curl_easy_init();
     if (curl) {
@@ -63,11 +63,6 @@ int wait_for_network_connection(int attempts) {
                 case CURLE_COULDNT_RESOLVE_HOST:
                 case CURLE_COULDNT_RESOLVE_PROXY:
                     log_warn("No internet connection. Retrying [%d/%d]...", attempt_counter, attempts);
-                    if (attempt_counter % 2) {
-                        set_led_color(LED_YELLOW);
-                    } else {
-                        set_led_color(LED_GREEN);
-                    }
                     sleep(10);
                     break;
                 case CURLE_OK:
@@ -450,7 +445,7 @@ int make_request(char *method, char *url, char *data, char *scope, bool dps) {
         return -1;
     }
 
-    log_trace("\nRESPONSE:\n%s", _curl_buffer);
+    log_trace("RESPONSE:\n%s", _curl_buffer);
 
     _json_response = json_parse_string(_curl_buffer);
 

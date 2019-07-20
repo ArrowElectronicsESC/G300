@@ -8,6 +8,7 @@
 #include "log.h"
 #include "bg_types.h"
 #include "gecko_bglib.h"
+#include "led_worker.h"
 
 static void initialize_thunderboard();
 static void handle_state_transition(AppState new_state);
@@ -66,7 +67,8 @@ void handle_event(struct gecko_cmd_packet *event) {
 static void print_message_info(struct gecko_cmd_packet *event) {
     uint32_t message_id = BGLIB_MSG_ID(event->header);
 
-    log_trace("\n\nMESSAGE\n  Header: 0x%X\n  Message ID: 0x%X\n", event->header, message_id);
+    log_trace("\n\nMESSAGE\n  Header: 0x%X\n  Message ID: 0x%X\n",
+        event->header, message_id);
     if (event->header & gecko_msg_type_rsp) {
         log_trace("  Type: RESPONSE\n");
     } else if (event->header & gecko_msg_type_evt) {
@@ -287,12 +289,6 @@ static void state_handler_init(uint32_t message_id, struct gecko_cmd_packet *eve
 
 static void state_handler_discovery(uint32_t message_id, struct gecko_cmd_packet *event, bool entry) {
     static time_t discovery_start_time;
-    static uint8_t advertisement_counter = 0;
-    if (advertisement_counter++ % 2) {
-        set_led_color(LED_YELLOW);
-    } else {
-        set_led_color(LED_GREEN);
-    }
 
     if (entry) {
         discovery_start_time = time(NULL);
@@ -347,6 +343,14 @@ static void state_handler_discovery(uint32_t message_id, struct gecko_cmd_packet
 
 static void state_handler_connect(uint32_t message_id, struct gecko_cmd_packet *event, bool entry) {
     if (entry) {
+        LedJob flash_green_job = {
+            LED_JOB_ON_OFF,
+            500,
+            {LED_GREEN, 0, 0},
+            1
+        };
+        push_led_job(flash_green_job);
+
         struct gecko_msg_le_gap_connect_rsp_t *response =
             gecko_cmd_le_gap_connect(_thunderboard.address, le_gap_address_type_public, le_gap_phy_1m);
         if (response->result == 0) {
@@ -360,7 +364,6 @@ static void state_handler_connect(uint32_t message_id, struct gecko_cmd_packet *
 
     switch (message_id) {
         case gecko_evt_le_connection_opened_id:
-            set_led_color(LED_GREEN);
             handle_state_transition(STATE_DISCOVER_SERVICES);
             break;
 
@@ -617,6 +620,14 @@ static void state_handler_read_characteristics(uint32_t message_id, struct gecko
     static uint32_t sensor_index = 0;
 
     if (entry) {
+        LedJob flash_green_red_job = {
+            LED_JOB_ALTERNATE,
+            500,
+            {LED_GREEN, LED_RED, 0},
+            2
+        };
+        push_led_job(flash_green_red_job);
+
         uint32_t i;
         for (i = 0; i < NUM_THUNDERBOARD_SENSORS; i++) {
             log_trace("all_sensors[%u]: %p", i, _thunderboard.all_sensors[i]);

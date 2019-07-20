@@ -23,7 +23,8 @@ $(SRCDIR)/app.c\
 $(SRCDIR)/uart_posix.c\
 $(SRCDIR)/gecko_bglib.c\
 $(SRCDIR)/azure_functions.c\
-$(SRCDIR)/log.c
+$(SRCDIR)/log.c\
+$(SRCDIR)/led_worker.c
 
 OBJ=$(SRC:.c=.o)
 

@@ -1,6 +1,30 @@
+/*******************************************************************************
+* Copyright Arrow Electronics, Inc., 2019
+* THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+* REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+* AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+* INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+* LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
+* OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+* PERFORMANCE OF THIS SOFTWARE.
+*******************************************************************************/
+
+/*******************************************************************************
+*  Author: Andrew Reisdorph
+*  Date:   2019/07/21
+*******************************************************************************/
+
 #include "main.h"
+#include "app.h"
+#include "bg_types.h"
+#include "gecko_bglib.h"
+#include "uart.h"
+#include "azure_functions.h"
+#include "log.h"
+#include "led_worker.h"
 
 #include <curl/curl.h>
+
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,14 +33,6 @@
 #include <fcntl.h>
 #include <stdlib.h>
 #include <pthread.h>
-
-#include "app.h"
-#include "bg_types.h"
-#include "gecko_bglib.h"
-#include "uart.h"
-#include "azure_functions.h"
-#include "log.h"
-#include "led_worker.h"
 
 //TODO Before Release - Set advertisement timeout time much higher
 // orientation 0-180
@@ -56,10 +72,14 @@ int main(int argc, char **argv) {
     };
     push_led_job(program_start_job);
 
-    _log_file = fopen(LOG_FILE_PATH, "w");
-    if (_log_file) {
-        log_set_fp(_log_file);
-        log_set_level(arguments.log_level);
+    if (arguments.disable_log_file) {
+        log_info("Logfile Disabled");
+    } else {
+        _log_file = fopen(LOG_FILE_PATH, "w");
+        if (_log_file) {
+            log_set_fp(_log_file);
+            log_set_level(arguments.log_level);
+        }
     }
 
     res = curl_global_init(CURL_GLOBAL_ALL);
@@ -177,6 +197,7 @@ static int get_parameters(int argc, char **argv, G300Args *args) {
     args->baudrate = 115200;
     snprintf(args->serial_port, sizeof(args->serial_port), "/dev/ttyS1");
     args->log_level = LOG_DEBUG;
+    args->disable_log_file = FALSE;
 
     if (argc == 1) {
         return 0;
@@ -225,6 +246,12 @@ static int get_parameters(int argc, char **argv, G300Args *args) {
                 } else {
                     expect_log = TRUE;
                 }
+            } else if (strcmp(argv[arg_index], "-n") == 0) {
+                args->disable_log_file = TRUE;
+            } else if (strcmp(argv[arg_index], "-h") == 0 || (strcmp(argv[arg_index], "--help") == 0)) {
+                printf(USAGE, argv[0]);
+                printf(HELP_MESSAGE);
+                return -1;
             } else {
                 printf(USAGE, argv[0]);
                 return -1;

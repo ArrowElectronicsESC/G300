@@ -1,6 +1,23 @@
+/*******************************************************************************
+* Copyright Arrow Electronics, Inc., 2019
+* THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+* REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+* AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+* INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+* LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
+* OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+* PERFORMANCE OF THIS SOFTWARE.
+*******************************************************************************/
+
+/*******************************************************************************
+*  Author: Andrew Reisdorph
+*  Date:   2019/07/21
+*******************************************************************************/
+
 #ifndef __INCLUDE_APP_H
 #define __INCLUDE_APP_H
 
+#include <stdbool.h>
 #include "bg_types.h"
 #include "gecko_bglib.h"
 #include "main.h"
@@ -12,8 +29,6 @@
 #define VALUE_PAYLOAD_LENGTH 64
 #define NUM_THUNDERBOARD_SENSORS 10
 #define ADVERTISEMENT_TIMEOUT_SECONDS (1 * 60)
-
-typedef uint8_t bool;
 
 typedef void (*state_handler)(uint32_t, struct gecko_cmd_packet *, bool);
 
@@ -59,6 +74,7 @@ typedef struct Characteristic {
     uint8_t value_length;
     uint32_t characteristic;
     CharacteristicProperties properties;
+    bool subscribed;
 } Characteristic;
 
 typedef struct CharacteristicList {
@@ -67,7 +83,6 @@ typedef struct CharacteristicList {
 } CharacteristicList;
 
 typedef struct ThunderBoardDevice {
-    bool initialized;
     char name[MAX_NAME_LENGTH];
     bd_addr address;
     int8_t rssi;

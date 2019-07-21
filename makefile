@@ -1,5 +1,5 @@
 
-CFLAGS=-static -Wall
+CFLAGS=-static -Wall -Werror
 
 INCLUDES=-Igecko_bglib/include -I$(TOOLCHAIN_SYSROOT)/usr/include/azureiot
 

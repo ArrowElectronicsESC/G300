@@ -1,12 +1,29 @@
-#include <stdint.h>
-#include <unistd.h>
-#include <curl/curl.h>
-#include <azureiot/azure_c_shared_utility/sastoken.h>
-#include <azureiot/parson.h>
+/*******************************************************************************
+* Copyright Arrow Electronics, Inc., 2019
+* THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+* REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+* AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+* INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+* LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
+* OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+* PERFORMANCE OF THIS SOFTWARE.
+*******************************************************************************/
+
+/*******************************************************************************
+*  Author: Andrew Reisdorph
+*  Date:   2019/07/21
+*******************************************************************************/
 
 #include "azure_functions.h"
 #include "main.h"
 #include "log.h"
+
+#include <curl/curl.h>
+#include <azureiot/azure_c_shared_utility/sastoken.h>
+#include <azureiot/parson.h>
+
+#include <stdint.h>
+#include <unistd.h>
 
 static unsigned long long get_utc_ms_timestamp();
 static int extract_json_string(JSON_Object* json_object, const char* field_name, char *destination, int size);

@@ -217,19 +217,42 @@ static double translate_value(double value, double input_range_min,
 static void refresh_sensor_values() {
   _sensor_values.id++;
 
+  char buff[64];
+
+
   _sensor_values.temperature =
       ((double)(*((int16_t *)_thunderboard.temperature_sensor->value))) * 0.01;
+  bytes_to_hex_string(_thunderboard.temperature_sensor->value_length, _thunderboard.temperature_sensor->value, false, buff);
+  log_trace("Temperature: (%f) %s",_sensor_values.temperature,buff);
+  
   _sensor_values.pressure =
       ((double)(*((uint32_t *)_thunderboard.pressure_sensor->value))) * 0.1;
+  bytes_to_hex_string(_thunderboard.pressure_sensor->value_length, _thunderboard.pressure_sensor->value, false, buff);
+  log_trace("Pressure: (%f) %s",_sensor_values.pressure,buff);
+
   _sensor_values.humidity =
       ((double)(*((uint16_t *)_thunderboard.humidity_sensor->value))) * 0.01;
+  bytes_to_hex_string(_thunderboard.humidity_sensor->value_length, _thunderboard.humidity_sensor->value, false, buff);
+  log_trace("Humidity: (%f) %s",_sensor_values.humidity,buff);
+
   _sensor_values.co2 = (double)(*((uint16_t *)_thunderboard.co2_sensor->value));
+  bytes_to_hex_string(_thunderboard.co2_sensor->value_length, _thunderboard.co2_sensor->value, false, buff);
+  log_trace("CO2: (%f) %s",_sensor_values.co2,buff);
+
   _sensor_values.voc =
       ((double)(*((uint16_t *)_thunderboard.voc_sensor->value))) * 0.01;
+  bytes_to_hex_string(_thunderboard.voc_sensor->value_length, _thunderboard.voc_sensor->value, false, buff);
+  log_trace("VOC: (%f) %s",_sensor_values.voc,buff);
+
   _sensor_values.light =
       ((double)(*((uint32_t *)_thunderboard.light_sensor->value))) * 0.001;
+  bytes_to_hex_string(_thunderboard.light_sensor->value_length, _thunderboard.light_sensor->value, false, buff);
+  log_trace("Light: (%f) %s",_sensor_values.light,buff);
+
   _sensor_values.sound =
       ((double)(*((uint16_t *)_thunderboard.sound_sensor->value))) * 0.01;
+  bytes_to_hex_string(_thunderboard.sound_sensor->value_length, _thunderboard.sound_sensor->value, false, buff);
+  log_trace("Sound: (%f) %s",_sensor_values.sound,buff);
 
   _sensor_values.acceleration[0] =
       ((double)(*(
@@ -745,6 +768,7 @@ static void state_handler_read_characteristics(uint32_t message_id,
                                                struct gecko_cmd_packet *event,
                                                bool entry) {
   static uint32_t sensor_index = 0;
+  static uint32_t last_requested_characteristic = 0;
 
   if (entry) {
     LedJob flash_green_red_job = {
@@ -758,7 +782,8 @@ static void state_handler_read_characteristics(uint32_t message_id,
 
     for (sensor_index = 0; sensor_index < NUM_THUNDERBOARD_SENSORS;
          sensor_index++) {
-      if (_thunderboard.all_sensors[sensor_index] != NULL) {
+      if (_thunderboard.all_sensors[sensor_index] != NULL && _thunderboard.all_sensors[sensor_index]->properties.read) {
+        log_trace("Requesting characteristic: %d", _thunderboard.all_sensors[sensor_index]->characteristic);
         struct gecko_msg_gatt_read_characteristic_value_rsp_t *response =
             gecko_cmd_gatt_read_characteristic_value(
                 _thunderboard.connection,
@@ -768,6 +793,7 @@ static void state_handler_read_characteristics(uint32_t message_id,
                     response->result);
           handle_state_transition(STATE_INIT);
         }
+        last_requested_characteristic = _thunderboard.all_sensors[sensor_index]->characteristic;
         break;
       } else {
         log_warn("NULL Sensor at index %d", sensor_index);
@@ -778,21 +804,22 @@ static void state_handler_read_characteristics(uint32_t message_id,
 
   switch (message_id) {
   case gecko_evt_gatt_characteristic_value_id: {
-    log_trace("Got Characteristic value");
+    log_trace("Got value for characteristic: %d", event->data.evt_gatt_characteristic_value.characteristic);
     Characteristic *current_characteristic = get_characteristic_by_handle(
         event->data.evt_gatt_characteristic_value.characteristic);
     if (current_characteristic == NULL) {
       log_error("get_characteristic_by_handle for %d returned NULL",
                 event->data.evt_gatt_characteristic_value.characteristic);
     } else {
+
       memcpy(current_characteristic->value,
              event->data.evt_gatt_characteristic_value.value.data,
              event->data.evt_gatt_characteristic_value.value.len);
       current_characteristic->value_length =
           event->data.evt_gatt_characteristic_value.value.len;
-      if (current_characteristic->characteristic ==
-          event->data.evt_gatt_characteristic_value.characteristic) {
+      if (event->data.evt_gatt_characteristic_value.characteristic == last_requested_characteristic) {
         sensor_index++;
+        log_trace("incrementing sensor index (%d)", sensor_index);
       }
     }
   } break;
@@ -802,6 +829,7 @@ static void state_handler_read_characteristics(uint32_t message_id,
       if (_thunderboard.all_sensors[sensor_index] == NULL) {
         log_warn("WARNING: NULL Sensor at index %d", sensor_index);
       } else if (_thunderboard.all_sensors[sensor_index]->properties.read) {
+        log_trace("Requesting characteristic: %d", _thunderboard.all_sensors[sensor_index]->characteristic);
         struct gecko_msg_gatt_read_characteristic_value_rsp_t *response =
             gecko_cmd_gatt_read_characteristic_value(
                 _thunderboard.connection,
@@ -817,6 +845,7 @@ static void state_handler_read_characteristics(uint32_t message_id,
             flash_led();
           }
         }
+        last_requested_characteristic = _thunderboard.all_sensors[sensor_index]->characteristic;
         break;
       }
     }
@@ -824,6 +853,7 @@ static void state_handler_read_characteristics(uint32_t message_id,
     if (sensor_index >= NUM_THUNDERBOARD_SENSORS) {
       sensor_index = 0;
       refresh_sensor_values();
+      log_trace("Requesting characteristic: %d", _thunderboard.all_sensors[sensor_index]->characteristic);
       struct gecko_msg_gatt_read_characteristic_value_rsp_t *response =
           gecko_cmd_gatt_read_characteristic_value(
               _thunderboard.connection,
@@ -833,6 +863,7 @@ static void state_handler_read_characteristics(uint32_t message_id,
                   response->result);
         handle_state_transition(STATE_INIT);
       }
+      last_requested_characteristic = _thunderboard.all_sensors[sensor_index]->characteristic;
     }
     break;
 

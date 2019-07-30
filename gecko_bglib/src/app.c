@@ -220,16 +220,16 @@ static void refresh_sensor_values() {
   _sensor_values.temperature =
       ((double)(*((int16_t *)_thunderboard.temperature_sensor->value))) * 0.01;
   _sensor_values.pressure =
-      ((double)(*((uint32_t *)_thunderboard.pressure_sensor->value)) * 0.1);
+      ((double)(*((uint32_t *)_thunderboard.pressure_sensor->value))) * 0.1;
   _sensor_values.humidity =
-      ((double)(*((uint16_t *)_thunderboard.humidity_sensor->value)) * 0.01);
+      ((double)(*((uint16_t *)_thunderboard.humidity_sensor->value))) * 0.01;
   _sensor_values.co2 = (double)(*((uint16_t *)_thunderboard.co2_sensor->value));
   _sensor_values.voc =
-      ((double)(*((uint16_t *)_thunderboard.voc_sensor->value)) * 0.01);
+      ((double)(*((uint16_t *)_thunderboard.voc_sensor->value))) * 0.01;
   _sensor_values.light =
-      ((double)(*((uint32_t *)_thunderboard.light_sensor->value)) * 0.001);
+      ((double)(*((uint32_t *)_thunderboard.light_sensor->value))) * 0.001;
   _sensor_values.sound =
-      ((double)(*((uint16_t *)_thunderboard.sound_sensor->value)) * 0.01);
+      ((double)(*((uint16_t *)_thunderboard.sound_sensor->value))) * 0.01;
 
   _sensor_values.acceleration[0] =
       ((double)(*(
